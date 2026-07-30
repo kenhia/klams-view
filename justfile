@@ -21,7 +21,7 @@ run:
     cd web && pnpm build
     bash -c 'set -a; [ -f .env ] && . ./.env; set +a; cargo run'
 
-# Frontend dev server (proxies /api to the rust server on :7778)
+# Frontend dev server (proxies /api to the rust server on :7779)
 dev-web:
     cd web && pnpm dev
 
@@ -32,6 +32,13 @@ deploy: build
 # Show what `just deploy` would do, without touching the host
 deploy-dry-run: build
     deploy/install-systemd.sh --dry-run
+
+# Publish the loopback listener to the tailnet over HTTPS (idempotent).
+# Run once per host; see docs/deploy.md for why the service itself must
+# stay bound to 127.0.0.1.
+deploy-serve port="7779":
+    tailscale serve --bg --https={{port}} http://localhost:{{port}}
+    tailscale serve status
 
 # Tail the deployed service's log
 deploy-logs:

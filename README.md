@@ -26,7 +26,7 @@ You need a reachable klams instance, a Rust toolchain, and
 
 ```sh
 cp .env.example .env    # then set KLAMS_URL and KLAMS_TOKEN
-just run                # builds the SPA and serves it on :7778
+just run                # builds the SPA and serves it on :7779
 ```
 
 `just` on its own lists every recipe. The two-terminal dev loop is

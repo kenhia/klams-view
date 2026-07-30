@@ -42,37 +42,53 @@ identity keeps the dashboard from showing up as one of the agents it is
 reporting on. klams hot-reloads tokens on `systemctl reload
 klams-service` — no restart needed.
 
-## Bind address, and why it is the interesting decision
+## Bind address and tailnet publishing
 
 klams-view has **no authentication of its own**. Anything that can open
-the port reads the entire memory store. So `KLAMS_VIEW_ADDR` is the
-whole access-control story, and the shipped default —
-`0.0.0.0:7778` — is only safe because of what sits in front of it:
+the port reads the entire memory store, so the bind address is the
+whole access-control story.
 
-- ufw defaults to deny-incoming and there is no rule for 7778, so LAN
-  and WAN traffic is dropped.
-- Tailscale accepts traffic on its own interface ahead of ufw, so the
-  tailnet reaches it.
-
-The result is tailnet-only in practice, but it is *firewall-enforced*
-rather than *bind-enforced*, which is the weaker of the two. klams
-itself takes the stronger route: it binds localhost and its tailscale
-addresses explicitly and never listens on `0.0.0.0`.
-
-To match that, pin the address:
+Bind loopback, and publish to the tailnet through `tailscale serve`:
 
 ```sh
-KLAMS_VIEW_ADDR=100.x.y.z:7778     # this host's tailscale IPv4
+KLAMS_VIEW_ADDR=127.0.0.1:7779
 ```
 
-The trade: klams-view then binds one address (no localhost, no IPv6 —
-the config takes a single socket address), and the unit fails to start
-if tailscaled has not brought the address up yet. `Restart=on-failure`
-with `RestartSec=10` recovers from that, but it is a real ordering
-dependency where `0.0.0.0` has none.
+```sh
+tailscale serve --bg --https=7779 http://localhost:7779
+```
 
-**Do not add a ufw rule for 7778.** That is what would turn the default
-from "tailnet-only in practice" into "readable from the LAN".
+That gives one URL — `https://<host>.<tailnet>.ts.net:7779` — which
+works from every tailnet machine *including the serving host*, with TLS
+terminated in tailscaled. `http://localhost:7779` keeps working as the
+co-located fallback if tailscaled is down. It is the same shape klams,
+korg and kvllm all use.
+
+**Do not bind `0.0.0.0`, and do not bind the tailscale IP directly.**
+Both look like they would work and both are traps:
+
+- `tailscale serve` makes tailscaled hold real listeners on
+  `<tailscale-ip>:<port>` (v4 and the ts.net v6). A service that binds
+  `0.0.0.0:<port>` collides with that specific-IP bind and dies with
+  `EADDRINUSE` — and only on its *next* restart, because serve is
+  normally set up while the service is already running, so the breakage
+  is planted silently. This is exactly what moved klams-service off
+  `0.0.0.0:7777`.
+- Binding the tailscale IP yourself takes the address tailscaled wants,
+  loses localhost and IPv6 (the config takes one socket address), and
+  adds a startup ordering dependency on tailscaled.
+
+**Do not add a ufw rule for this port.** ufw default-denies incoming
+and tailscale accepts on its own interface ahead of it, so a loopback
+bind plus serve is already reachable exactly where it should be. A ufw
+rule would only widen it.
+
+## Why not :7778
+
+`:7778` belongs to klams: its eval bake-offs (the sprint 029/030
+throwaway pattern) build a branch binary and run it on 7778 against the
+live datastores. A permanent listener there fails the next bake-off, or
+gets killed to make room for one. klams-view uses `:7779`.
 
 ## Upgrades
 
@@ -96,7 +112,7 @@ sudo systemctl restart klams-view
 ```sh
 systemctl status klams-view
 just deploy-logs                 # journalctl -u klams-view -f
-curl -s localhost:7778/api/status # {"view":"ok","klams":"ok"}
+curl -s localhost:7779/api/status # {"view":"ok","klams":"ok"}
 ```
 
 `/api/status` reports the viewer and its view of klams separately —

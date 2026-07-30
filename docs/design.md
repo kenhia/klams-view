@@ -8,7 +8,7 @@ klams-view is built around that question.
 
 ## Shape
 
-One axum binary (`:7778`). It serves the SvelteKit SPA and an `/api/*`
+One axum binary (`:7779`). It serves the SvelteKit SPA and an `/api/*`
 layer that is the only thing the browser talks to. The server holds a
 `read`-scope klams token and calls the klams REST surface + the public
 `/healthz` and `/metrics`; it also owns every aggregation the klams
