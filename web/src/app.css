@@ -14,6 +14,32 @@
   --color-accent-soft: oklch(0.42 0.08 300);
   --color-data: oklch(0.78 0.13 210);
   --color-border: oklch(0.31 0.015 280);
+
+  /* Chart series palette — dataviz-skill reference dark set, validated
+     against this app's surface (#17181f): all 8 slots pass lightness
+     band, chroma, CVD separation, normal-vision floor, 3:1 contrast.
+     Fixed assignment order, never cycled; slots 1-3 only for
+     all-pairs forms (scatter etc.). Distinct from chrome accents:
+     data marks use --series-*, UI uses --color-accent. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  /* Status palette (reserved — never a series color). */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Chart chrome ink on the dark surface. */
+  --viz-grid: #2c2c34;
+  --viz-axis: #3a3a44;
+  --viz-muted: #898791;
 }
 
 html,

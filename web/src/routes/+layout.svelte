@@ -4,8 +4,13 @@
 
   let { children } = $props();
 
-  // Placeholder nav — the design pass owns the final set and order.
-  const nav = [{ href: "/", label: "Pulse" }];
+  const nav = [
+    { href: "/", label: "Pulse" },
+    { href: "/explore", label: "Explore" },
+    { href: "/activity", label: "Activity" },
+    { href: "/authors", label: "Authors" },
+    { href: "/health", label: "Health" },
+  ];
 
   function active(href: string, path: string): boolean {
     if (href === "/") return path === "/";
@@ -15,7 +20,7 @@
 
 <div class="min-h-screen">
   <header class="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-    <nav class="mx-auto flex max-w-[110rem] flex-wrap items-center gap-1 px-4 py-2">
+    <nav class="mx-auto flex max-w-[90rem] flex-wrap items-center gap-1 px-4 py-2">
       <a href="/" class="mr-4 text-lg font-semibold tracking-tight text-[var(--color-accent)]">
         klams-view
       </a>
@@ -30,7 +35,7 @@
       {/each}
     </nav>
   </header>
-  <main class="mx-auto max-w-[110rem] px-4 py-6">
+  <main class="mx-auto max-w-[90rem] px-4 py-6">
     {@render children()}
   </main>
 </div>

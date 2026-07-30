@@ -12,6 +12,8 @@ use tower_http::trace::TraceLayer;
 
 mod api;
 mod config;
+mod klams;
+mod metrics;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,6 +26,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = config::Config::from_env()?;
     let state = api::AppState::new(&cfg)?;
+
+    tokio::spawn(api::sampler(
+        state.clone(),
+        std::time::Duration::from_secs(60),
+    ));
 
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))

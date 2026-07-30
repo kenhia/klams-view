@@ -5,20 +5,18 @@
 
 ## Now
 
-- Sprint 001 — scaffold + first light: repo harness, axum server
-  (static hosting + `/api/status`), SvelteKit dark shell, design doc,
-  and a Pulse dashboard fed by real aggregations over the klams API.
+- Deploy story: container on kubsdb or unit on kubs0 — decide with
+  Ken, then a deploy skill/recipe + dedicated read-only token in
+  `/etc/klams/klams.toml`.
 
 ## Next
 
-- Browse surfaces: unified search workbench (the `search_unified`
-  endpoint the old viewport never wired up), knowledge browser with
-  facet filters (repo/machine/tag), facts + events tables with real
-  pagination.
-- Authors: contribution profiles with per-author activity charts.
-- Live activity: auto-refreshing memory timeline (the viewport was
-  manual-pull everywhere).
-- Deploy story: container on kubsdb or unit on kubs0 — decide with Ken.
+- Knowledge browser with facet filters (repo/machine/tag/language) —
+  there is still no way to browse knowledge without a query.
+- Search-ranking workbench over MCP (`ScoredMemory` raw vs fused
+  scores, `memory_related`) — REST doesn't expose them.
+- Component/E2E tests (playwright is already proven against the app
+  headlessly).
 
 ## Later / Ideas
 
