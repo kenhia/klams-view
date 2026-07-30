@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/* klams-view palette — same oklch dark family as korg (bg hue 270)
+   but its own accent identity; korg is blue (240), klams-view is
+   violet (300) with cyan as the data/secondary hue. Placeholder set;
+   the design pass owns the final values. */
+@theme {
+  --color-bg: oklch(0.17 0.012 280);
+  --color-surface: oklch(0.21 0.014 280);
+  --color-surface-hi: oklch(0.26 0.016 280);
+  --color-text: oklch(0.94 0.005 280);
+  --color-muted: oklch(0.67 0.012 280);
+  --color-accent: oklch(0.74 0.16 300);
+  --color-accent-soft: oklch(0.42 0.08 300);
+  --color-data: oklch(0.78 0.13 210);
+  --color-border: oklch(0.31 0.015 280);
+}
+
+html,
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  min-height: 100vh;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
