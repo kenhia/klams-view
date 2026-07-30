@@ -27,6 +27,11 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
+        with:
+          # There is no package.json at the repo root, so the action
+          # has to be pointed at the one carrying `packageManager` —
+          # otherwise it fails with "No pnpm version is specified".
+          package_json_file: web/package.json
 
       - name: Install Node
         uses: actions/setup-node@v4
