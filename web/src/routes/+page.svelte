@@ -2,7 +2,7 @@
   // Pulse — the dashboard. One /api/overview call renders the top;
   // the activity chart re-fetches per selected range. Auto-refreshes
   // every 60s, holding the previous render (no skeleton flash).
-  import { api } from "$lib/api";
+  import { api, sinceHoursAgo } from "$lib/api";
   import type { Activity, MemoryRow, Overview, SubsystemHealth } from "$lib/types";
   import StatTile from "$lib/components/StatTile.svelte";
   import StackedColumns from "$lib/components/StackedColumns.svelte";
@@ -25,7 +25,7 @@
   async function refresh() {
     loading = true;
     try {
-      const since = new Date(Date.now() - rangeHours * 3600_000).toISOString();
+      const since = sinceHoursAgo(rangeHours);
       const [o, a, h] = await Promise.all([
         api.overview(),
         api.activity({ since }),

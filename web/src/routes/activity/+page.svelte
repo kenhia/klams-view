@@ -3,7 +3,7 @@
   // One filter row scopes both the chart and the table; the table
   // pages with the (working) /v1/memories cursor; auto-refresh is
   // opt-in and holds the frame while refetching.
-  import { api } from "$lib/api";
+  import { api, sinceHoursAgo } from "$lib/api";
   import type { Activity, Author, MemoriesPage, MemoryKind, MemoryRow } from "$lib/types";
   import { KIND_COLOR, KIND_LABEL, KINDS } from "$lib/kinds";
   import StackedColumns from "$lib/components/StackedColumns.svelte";
@@ -33,7 +33,7 @@
   async function refresh() {
     loading = true;
     try {
-      const since = new Date(Date.now() - rangeHours * 3600_000).toISOString();
+      const since = sinceHoursAgo(rangeHours);
       const params = {
         since,
         kinds: kindsCsv,
@@ -57,7 +57,7 @@
 
   async function more() {
     if (!cursor) return;
-    const since = new Date(Date.now() - rangeHours * 3600_000).toISOString();
+    const since = sinceHoursAgo(rangeHours);
     const m = await api.memories({
       since,
       kinds: kindsCsv,

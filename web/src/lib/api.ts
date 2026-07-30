@@ -42,6 +42,17 @@ function qs(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : "";
 }
 
+/**
+ * `since` for an hours-back window, with a one-minute safety margin:
+ * the server (and klams) stamp `until = now` at *their* clocks, a
+ * beat after the browser computes `since` — without the margin a
+ * full 30-day preset lands a hair over klams' 30-day window cap and
+ * 400s with `window_too_large`.
+ */
+export function sinceHoursAgo(hours: number): string {
+  return new Date(Date.now() - hours * 3600_000 + 60_000).toISOString();
+}
+
 export const api = {
   overview: () => request<Overview>("/api/overview"),
   activity: (params: {
