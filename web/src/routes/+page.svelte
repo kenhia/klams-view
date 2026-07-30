@@ -12,12 +12,17 @@
   import MemoryDetail from "$lib/components/MemoryDetail.svelte";
   import Drawer from "$lib/components/Drawer.svelte";
   import TimeRange from "$lib/components/TimeRange.svelte";
+  import ScannerToggle from "$lib/components/ScannerToggle.svelte";
   import { relTime, uptime } from "$lib/format";
+  import { scannerNames } from "$lib/agents";
 
   let overview = $state<Overview | null>(null);
   let activity = $state<Activity | null>(null);
   let sparks = $state<{ searches: number[]; queue: number[] }>({ searches: [], queue: [] });
   let rangeHours = $state(24);
+  // Off by default: both panels below are fed by one /api/activity
+  // call, and with scanners in it they are both a single bar.
+  let includeScanners = $state(false);
   let error = $state<string | null>(null);
   let loading = $state(false);
   let selected = $state<MemoryRow | null>(null);
@@ -28,7 +33,7 @@
       const since = sinceHoursAgo(rangeHours);
       const [o, a, h] = await Promise.all([
         api.overview(),
-        api.activity({ since }),
+        api.activity({ since, include_scanners: includeScanners }),
         api.metricsHistory().catch(() => ({ samples: [] })),
       ]);
       overview = o;
@@ -48,6 +53,7 @@
 
   $effect(() => {
     void rangeHours;
+    void includeScanners;
     void refresh();
   });
   $effect(() => {
@@ -65,6 +71,9 @@
   });
 
   const backupAge = $derived(overview?.metrics?.backup?.last_success_unix ?? null);
+  // Named for the toggle's tooltip; the exclusion itself is applied
+  // server-side, so this is presentation only.
+  const scanners = $derived(scannerNames((overview?.agents ?? []).map((a) => a.agent_name)));
 </script>
 
 <svelte:head><title>klams-view · Pulse</title></svelte:head>
@@ -132,8 +141,16 @@
       class="mt-6 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
     >
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold">Writes over time</h2>
-        <TimeRange value={rangeHours} onchange={(h) => (rangeHours = h)} />
+        <h2 class="text-sm font-semibold">
+          Writes over time
+          {#if !includeScanners}<span class="font-normal text-[var(--color-muted)]"
+              >(scanners hidden)</span
+            >{/if}
+        </h2>
+        <div class="flex flex-wrap items-center gap-4">
+          <ScannerToggle bind:checked={includeScanners} names={scanners} />
+          <TimeRange value={rangeHours} onchange={(h) => (rangeHours = h)} />
+        </div>
       </div>
       {#if activity}
         {#if activity.truncated}
