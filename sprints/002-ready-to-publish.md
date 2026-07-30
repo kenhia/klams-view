@@ -31,13 +31,25 @@ opened.
   crosses the network, and klams already establishes the native-unit
   pattern there. The container-on-the-docker-host alternative is
   written up and rejected in docs/deploy.md rather than left implicit.
-- **Bind address is the access-control story.** klams-view has no auth
-  of its own. The shipped default is `0.0.0.0:7778`, tailnet-only *in
-  practice* because ufw denies incoming and tailscale accepts ahead of
-  it — firewall-enforced, not bind-enforced, which is weaker than what
-  klams does for itself. docs/deploy.md states this plainly and gives
-  the stronger option (pin the tailscale IP, accept the tailscaled
-  ordering dependency).
+- **Port `:7779`, not `:7778`.** Caught after the first deploy: 7778
+  is klams' throwaway eval-instance port — the sprint 029/030 bake-off
+  pattern builds a branch binary there against the live datastores, so
+  a permanent listener on it fails the next eval or gets killed to make
+  room for one. Renumbered everywhere, with the reason recorded in
+  CLAUDE.md so it isn't re-litigated.
+- **Bind loopback, publish with `tailscale serve`.** klams-view has no
+  auth of its own, so the bind address is the entire access-control
+  story. The first cut shipped `0.0.0.0` and leaned on ufw — reachable
+  in the right places, but firewall-enforced rather than bind-enforced.
+  The obvious fix (pin the tailscale IP) was wrong for a second reason:
+  `tailscale serve` makes tailscaled hold `<ts-ip>:<port>` itself, so
+  binding it is the same EADDRINUSE trap that moved klams-service off
+  `0.0.0.0:7777` — and it only detonates on the next restart. Settled
+  on the house pattern: bind `127.0.0.1:7779`, publish via `tailscale
+  serve --bg --https=7779`, as klams, korg and kvllm all do. One TLS
+  URL that works from every tailnet host including this one, localhost
+  intact as a fallback, no ordering dependency. `just deploy-serve`
+  does the publish step.
 - **Public, and the scrub was nearly a no-op.** Ken's call: host names
   may stay, tailnet names may not. Verified before publishing — git
   history has never contained `.env` or any file outside the current
