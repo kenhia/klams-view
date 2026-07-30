@@ -14,8 +14,12 @@ jobs:
     name: check (rust + web)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Every action below is pinned to a major that declares
+    # `using: node24`. GitHub is retiring the Node 20 action runtime
+    # and silently running node20 actions on 24 in the meantime, which
+    # is a deprecation warning today and a break later.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -26,7 +30,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           # There is no package.json at the repo root, so the action
           # has to be pointed at the one carrying `packageManager` —
@@ -34,9 +38,10 @@ jobs:
           package_json_file: web/package.json
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          # Matches the runtime the actions themselves now run on.
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
