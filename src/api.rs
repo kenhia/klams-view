@@ -257,6 +257,16 @@ struct ActivityParams {
     state: Option<String>,
     /// "hour" or "day"; default: hour for spans <= 3 days.
     bucket: Option<String>,
+    /// Scanner corpora outweigh interactive agents ~1000:1, so the UI
+    /// asks for them to be left out by default. Defaults to `true`
+    /// here — a bare `/api/activity` still reports everything.
+    include_scanners: Option<bool>,
+}
+
+/// Bulk ingest agents (`klams-scanner`, `kai-scanner`, …) are named by
+/// convention, and there is no upstream flag distinguishing them.
+fn is_scanner(agent_name: &str) -> bool {
+    agent_name.ends_with("-scanner")
 }
 
 /// Time-bucketed counts by kind over `/v1/memories`, walked
@@ -310,6 +320,10 @@ async fn activity(State(state): State<AppState>, Query(p): Query<ActivityParams>
     let mut oldest_seen: Option<i64> = None;
     let mut cursor: Option<String> = None;
     const MAX_PAGES: usize = 100;
+    // Note the walk still *pages* over scanner rows — klams has no
+    // exclude-author filter — so the MAX_PAGES cap is unchanged by
+    // this; only what lands in the buckets differs.
+    let include_scanners = p.include_scanners.unwrap_or(true);
 
     for page_no in 0..=MAX_PAGES {
         if page_no == MAX_PAGES {
@@ -338,10 +352,15 @@ async fn activity(State(state): State<AppState>, Query(p): Query<ActivityParams>
                 continue;
             };
             let secs = ts.timestamp();
+            // Coverage is a property of the walk, not of the filter,
+            // so scanner rows still move `oldest_seen`.
             oldest_seen = Some(oldest_seen.map_or(secs, |o: i64| o.min(secs)));
+            let agent = m["author"]["agent_name"].as_str().unwrap_or("unknown");
+            if !include_scanners && is_scanner(agent) {
+                continue;
+            }
             let width = bucket_hours * 3600;
             buckets.entry(secs - secs.rem_euclid(width)).or_default()[slot] += 1;
-            let agent = m["author"]["agent_name"].as_str().unwrap_or("unknown");
             by_author.entry(agent.to_string()).or_default()[slot] += 1;
             total += 1;
         }
@@ -458,4 +477,26 @@ async fn metrics_summary(State(state): State<AppState>) -> Response {
 async fn metrics_history(State(state): State<AppState>) -> Response {
     let snap = state.0.history.read().await.snapshot();
     Json(json!({ "samples": snap })).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scanners_are_recognised_by_name_suffix() {
+        assert!(is_scanner("klams-scanner"));
+        assert!(is_scanner("kai-scanner"));
+        // Interactive agents, including ones that merely mention it.
+        assert!(!is_scanner("claude"));
+        assert!(!is_scanner("klams-mind"));
+        assert!(!is_scanner("scanner"));
+        assert!(!is_scanner("scanner-repair"));
+    }
+
+    #[test]
+    fn urlenc_escapes_timestamps_and_csv_lists() {
+        assert_eq!(urlenc("2026-07-30T18:00:00Z"), "2026-07-30T18%3A00%3A00Z");
+        assert_eq!(urlenc("fact,knowledge"), "fact%2Cknowledge");
+    }
 }

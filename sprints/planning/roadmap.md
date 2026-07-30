@@ -5,9 +5,9 @@
 
 ## Now
 
-- Deploy story: container on kubsdb or unit on kubs0 — decide with
-  Ken, then a deploy skill/recipe + dedicated read-only token in
-  `/etc/klams/klams.toml`.
+- Nothing in flight. Sprint 002 closed out the deploy story (systemd
+  unit on the klams host, `just deploy`, docs/deploy.md), the
+  dedicated read-only token, and publishing the repo.
 
 ## Next
 

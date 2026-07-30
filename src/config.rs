@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 pub struct Config {
-    /// Address to listen on. `KLAMS_VIEW_ADDR`, default `127.0.0.1:7778`.
+    /// Address to listen on. `KLAMS_VIEW_ADDR`, default `127.0.0.1:7779`.
     pub listen_addr: String,
     /// Built SPA directory. `KLAMS_VIEW_STATIC`, default `web/build`
     /// if it exists, else none (API-only, for dev where `vite dev`
@@ -22,7 +22,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         let listen_addr =
-            std::env::var("KLAMS_VIEW_ADDR").unwrap_or_else(|_| "127.0.0.1:7778".into());
+            std::env::var("KLAMS_VIEW_ADDR").unwrap_or_else(|_| "127.0.0.1:7779".into());
         let static_dir = match std::env::var("KLAMS_VIEW_STATIC") {
             Ok(s) if s.is_empty() => None,
             Ok(s) => Some(PathBuf::from(s)),

@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: process.env.KLAMS_VIEW_API ?? "http://localhost:7778",
+        target: process.env.KLAMS_VIEW_API ?? "http://localhost:7779",
         changeOrigin: true,
       },
     },

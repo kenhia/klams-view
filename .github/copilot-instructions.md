@@ -51,11 +51,11 @@ scaffold; design + first real pages in progress.
 
 - `just check` — fmt, clippy `-D warnings`, cargo test, svelte-check,
   prettier check, SPA build. This is the CI gate.
-- `just run` — build SPA + run server on `127.0.0.1:7778` (sources
+- `just run` — build SPA + run server on `127.0.0.1:7779` (sources
   `.env`: `KLAMS_URL`, `KLAMS_TOKEN`, `KLAMS_VIEW_ADDR`,
   `KLAMS_VIEW_STATIC`).
 - `just dev-api` + `just dev-web` — two-terminal dev loop; vite on
-  :5174 proxies `/api` to :7778.
+  :5174 proxies `/api` to :7779.
 
 ### Read first
 
@@ -75,7 +75,15 @@ scaffold; design + first real pages in progress.
 - klams-view talks to klams **only** through the public HTTP API —
   never Postgres directly; the klams schema is not a contract.
 - The klams service listens on `:7777` (kubs0); klams-view claims
-  `:7778`. Vite dev uses :5174 (korg's dev server owns 5173).
+  `:7779`. Vite dev uses :5174 (korg's dev server owns 5173).
+  **Not `:7778`** — that is klams' throwaway eval-instance port (the
+  sprint 029/030 bake-off pattern builds a branch binary there against
+  live data), so a permanent listener on it breaks the next eval.
+- Bind `127.0.0.1` and publish over `tailscale serve --https`, never
+  `0.0.0.0` and never the tailscale IP directly: tailscaled holds
+  `<ts-ip>:<port>` for the serve endpoint, so a wider bind collides
+  with EADDRINUSE on the next restart. This is the same trap that
+  moved klams-service off `0.0.0.0:7777`.
 - SPA fallback must stay `ServeDir::fallback(ServeFile)` so deep
   links return 200, not 404 (korg WI #284 lesson).
 - Dark theme only; tokens are oklch CSS vars in `@theme` — no

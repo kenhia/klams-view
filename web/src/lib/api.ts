@@ -33,7 +33,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function qs(params: Record<string, string | number | undefined>): string {
+function qs(params: Record<string, string | number | boolean | undefined>): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== "") p.set(k, String(v));
@@ -62,6 +62,8 @@ export const api = {
     authors?: string;
     state?: string;
     bucket?: string;
+    /** Omitted means "everything"; the UI passes false by default. */
+    include_scanners?: boolean;
   }) => request<Activity>(`/api/activity${qs(params)}`),
   memories: (params: {
     since?: string;

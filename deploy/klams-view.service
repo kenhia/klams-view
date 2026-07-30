@@ -1,0 +1,47 @@
+[Unit]
+Description=klams-view — web viewer and dashboard for klams
+Documentation=https://github.com/kenhia/klams-view
+After=network-online.target
+Wants=network-online.target
+# klams-view is a read-only client of klams over HTTP. It deliberately
+# does NOT declare After=klams-service: if klams is down or restarting,
+# the dashboard should still come up and render the outage rather than
+# refusing to start.
+
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=klams-view
+Group=klams-view
+ExecStart=/usr/local/bin/klams-view
+# Holds KLAMS_URL / KLAMS_TOKEN / KLAMS_VIEW_ADDR / KLAMS_VIEW_STATIC.
+# 0640 root:klams-view — it carries the klams bearer token.
+EnvironmentFile=/etc/klams-view/klams-view.env
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Hardening. klams-view writes nothing — no state dir, no config
+# writes — so it can be locked down harder than klams itself.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

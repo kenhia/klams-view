@@ -8,7 +8,7 @@ klams-view is built around that question.
 
 ## Shape
 
-One axum binary (`:7778`). It serves the SvelteKit SPA and an `/api/*`
+One axum binary (`:7779`). It serves the SvelteKit SPA and an `/api/*`
 layer that is the only thing the browser talks to. The server holds a
 `read`-scope klams token and calls the klams REST surface + the public
 `/healthz` and `/metrics`; it also owns every aggregation the klams
@@ -31,13 +31,22 @@ deep review — its one elaborate viewport screen guards ~one dissent
 ever filed) and write/curation actions (v1 is read-only by token
 design; curation comes later behind a `manage` token if wanted).
 
+Scanner agents (`*-scanner`) are excluded from every agent-facing
+chart by default, behind an "Include scanners" toggle on Pulse,
+Activity and Authors. Their corpora outrun interactive agents by
+~1000:1, so an unfiltered chart shows nothing else. Pulse asks the
+server for the exclusion; Activity expresses it as an author
+inclusion list so its chart and its passthrough-fed table cannot
+disagree; Authors filters client-side. See `web/src/lib/agents.ts`
+and `is_scanner` in `src/api.rs` — the two must agree.
+
 ## Server `/api`
 
 | Endpoint | Backing | Notes |
 |---|---|---|
 | `GET /api/status` | `/healthz` reachability | exists |
 | `GET /api/overview` | authors + healthz + metrics + `/v1/memories` first page | one call renders Pulse |
-| `GET /api/activity?since&until&kinds&authors&state&bucket` | pages `/v1/memories` server-side | returns time buckets by kind; page fetch capped, cap reported |
+| `GET /api/activity?since&until&kinds&authors&state&bucket&include_scanners` | pages `/v1/memories` server-side | returns time buckets by kind plus per-agent counts; page fetch capped, cap reported. `include_scanners=false` drops `*-scanner` authors from the counts — the walk still pages over them (klams has no exclude-author filter), and they still move `covered_since`, so coverage keeps describing the walk rather than the filter |
 | `GET /api/memories?…` | `/v1/memories` passthrough | table + cursor |
 | `GET /api/authors`, `/api/authors/{id}`, `/api/authors/{id}/memories` | passthrough | |
 | `POST /api/search` | `/memory/search` passthrough | |

@@ -5,10 +5,14 @@
   import { api } from "$lib/api";
   import type { Author } from "$lib/types";
   import AgentBars from "$lib/components/AgentBars.svelte";
+  import ScannerToggle from "$lib/components/ScannerToggle.svelte";
+  import { isScanner, scannerNames } from "$lib/agents";
   import { relTime } from "$lib/format";
 
   let authors = $state<Author[]>([]);
   let error = $state<string | null>(null);
+  // Chart only — the table below is the full roster either way.
+  let includeScanners = $state(false);
 
   $effect(() => {
     api
@@ -18,13 +22,16 @@
   });
 
   const rows = $derived(
-    authors.map((a) => ({
-      agent_name: a.agent_name,
-      fact: a.counts.writes,
-      knowledge: a.counts.knowledge,
-      event: a.counts.events,
-    })),
+    authors
+      .filter((a) => includeScanners || !isScanner(a.agent_name))
+      .map((a) => ({
+        agent_name: a.agent_name,
+        fact: a.counts.writes,
+        knowledge: a.counts.knowledge,
+        event: a.counts.events,
+      })),
   );
+  const scanners = $derived(scannerNames(authors.map((a) => a.agent_name)));
   const sorted = $derived(
     [...authors].sort((a, b) => Date.parse(b.last_seen_at) - Date.parse(a.last_seen_at)),
   );
@@ -39,11 +46,14 @@
 {/if}
 
 <section class="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-  <h2 class="mb-3 text-sm font-semibold">
-    Corpus share <span class="font-normal text-[var(--color-muted)]"
-      >(√ scale, exact values labeled)</span
-    >
-  </h2>
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <h2 class="text-sm font-semibold">
+      Corpus share <span class="font-normal text-[var(--color-muted)]"
+        >(√ scale, exact values labeled{includeScanners ? "" : ", scanners hidden"})</span
+      >
+    </h2>
+    <ScannerToggle bind:checked={includeScanners} names={scanners} />
+  </div>
   <AgentBars {rows} maxRows={10} log={true} />
 </section>
 

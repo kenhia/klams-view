@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (rust + web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Every action below is pinned to a major that declares
+    # `using: node24`. GitHub is retiring the Node 20 action runtime
+    # and silently running node20 actions on 24 in the meantime, which
+    # is a deprecation warning today and a break later.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          # There is no package.json at the repo root, so the action
+          # has to be pointed at the one carrying `packageManager` —
+          # otherwise it fails with "No pnpm version is specified".
+          package_json_file: web/package.json
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          # Matches the runtime the actions themselves now run on.
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: pnpm install
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      # These steps are `just check`, spelled out — running the recipe
+      # would mean installing `just` on the runner for no gain. The
+      # justfile stays the source of truth: change one, change both.
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test
+
+      - name: svelte-check
+        working-directory: web
+        run: pnpm check
+
+      - name: prettier --check
+        working-directory: web
+        run: pnpm format:check
+
+      - name: build SPA
+        working-directory: web
+        run: pnpm build

@@ -11,6 +11,8 @@
   import MemoryRowView from "$lib/components/MemoryRow.svelte";
   import MemoryDetail from "$lib/components/MemoryDetail.svelte";
   import Drawer from "$lib/components/Drawer.svelte";
+  import ScannerToggle from "$lib/components/ScannerToggle.svelte";
+  import { isScanner, scannerNames } from "$lib/agents";
   import { relTime } from "$lib/format";
 
   let rangeHours = $state(24);
@@ -18,8 +20,10 @@
   let authorId = $state("");
   let memState = $state("live");
   let live = $state(false);
+  let includeScanners = $state(false);
 
   let authors = $state<Author[]>([]);
+  let rosterLoaded = $state(false);
   let activity = $state<Activity | null>(null);
   let rows = $state<MemoryRow[]>([]);
   let cursor = $state<string | null>(null);
@@ -29,6 +33,17 @@
 
   const kindsCsv = $derived(KINDS.filter((k) => kinds[k]).join(",") || "fact,knowledge,event");
   const visibleKinds = $derived(KINDS.filter((k) => kinds[k]));
+  const scanners = $derived(scannerNames(authors.map((a) => a.agent_name)));
+  // Unlike Pulse, this page has to keep a chart and a paged table
+  // agreeing, and /api/memories is a passthrough with upstream
+  // paging — so exclusion is expressed as an inclusion list of every
+  // other author, which both endpoints already honour.
+  const authorsParam = $derived.by(() => {
+    if (authorId) return authorId;
+    if (includeScanners) return undefined;
+    const keep = authors.filter((a) => !isScanner(a.agent_name)).map((a) => a.id);
+    return keep.length ? keep.join(",") : undefined;
+  });
 
   async function refresh() {
     loading = true;
@@ -37,7 +52,7 @@
       const params = {
         since,
         kinds: kindsCsv,
-        authors: authorId || undefined,
+        authors: authorsParam,
         state: memState,
       };
       const [a, m]: [Activity, MemoriesPage] = await Promise.all([
@@ -61,7 +76,7 @@
     const m = await api.memories({
       since,
       kinds: kindsCsv,
-      authors: authorId || undefined,
+      authors: authorsParam,
       state: memState,
       limit: 50,
       cursor,
@@ -73,8 +88,11 @@
   $effect(() => {
     void rangeHours;
     void kindsCsv;
-    void authorId;
+    void authorsParam;
     void memState;
+    // The default filter is built from the author roster, so the
+    // first fetch waits for it rather than flashing a scanner spike.
+    if (!rosterLoaded) return;
     void refresh();
   });
   $effect(() => {
@@ -86,7 +104,8 @@
     api
       .authors({ limit: 200 })
       .then((p) => (authors = p.authors))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => (rosterLoaded = true));
   });
 </script>
 
@@ -121,6 +140,9 @@
     <option value="deleted">deleted</option>
     <option value="all">all</option>
   </select>
+  {#if !authorId}
+    <ScannerToggle bind:checked={includeScanners} names={scanners} />
+  {/if}
   <label class="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
     <input type="checkbox" bind:checked={live} class="accent-[var(--color-accent)]" />
     auto-refresh 30s
@@ -149,7 +171,9 @@
         kinds={visibleKinds}
       />
       <p class="mt-2 text-xs text-[var(--color-muted)]">
-        {activity.total.toLocaleString()} memories in window
+        {activity.total.toLocaleString()} memories in window{!authorId && !includeScanners
+          ? " (scanners hidden)"
+          : ""}
       </p>
     </section>
   {/if}
