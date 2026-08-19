@@ -44,7 +44,7 @@ and `is_scanner` in `src/api.rs` — the two must agree.
 
 | Endpoint | Backing | Notes |
 |---|---|---|
-| `GET /api/status` | `/healthz` reachability | exists |
+| `GET /api/status` | the connection doctor (`src/doctor.rs`) | walks config → token → dns → tcp → tls → healthz → **authed** → version and reports each link with its own fix; always 200, because it describes a chain rather than asserting one. Sprint 003 (#808) replaced the old `{view, klams: "ok"\|"unreachable"\|"unconfigured"}` shape, which collapsed "unreachable" and "the token is stale" into one word |
 | `GET /api/overview` | authors + healthz + metrics + `/v1/memories` first page | one call renders Pulse |
 | `GET /api/activity?since&until&kinds&authors&state&bucket&include_scanners` | pages `/v1/memories` server-side | returns time buckets by kind plus per-agent counts; page fetch capped, cap reported. `include_scanners=false` drops `*-scanner` authors from the counts — the walk still pages over them (klams has no exclude-author filter), and they still move `covered_since`, so coverage keeps describing the walk rather than the filter |
 | `GET /api/memories?…` | `/v1/memories` passthrough | table + cursor |
@@ -93,6 +93,28 @@ for scatter-class forms). Charts are hand-rolled SVG in Svelte — no
 chart library; the dataviz skill's mark/interaction specs are the
 spec (thin marks, 2px gaps, crosshair+tooltip, direct labels, legend
 for ≥2 series, one axis, no dual-scale ever).
+
+## Testing the layer klams' own tests cannot reach
+
+`/api` is where klams' response shapes get decoded, so it is where a
+contract change lands first — and a unit test of `is_scanner` cannot
+see any of it. Two layers cover it, and neither substitutes for the
+other:
+
+- `tests/api_contract.rs` — a stub klams on a loopback port, the real
+  `/api` router talking to it over real HTTP through the real `reqwest`
+  client. Hermetic and tokenless, so it runs in CI as part of
+  `cargo test`. **Fixtures are synthetic**, shape-derived from
+  `klams-types` and verified against a live klams: this repo is public,
+  so no real memory text, path or host goes in it.
+- `scripts/smoke-live.sh` (`just smoke-live`) — the same routes against
+  a real klams, plus a bad-token instance asserting the doctor's 401
+  path. Read-only; seeds nothing. This is what keeps
+  `KLAMS_VERIFIED_VERSION` honest, and the doctor's version step is what
+  tells you to re-run it.
+
+The roadmap's "component/E2E tests (playwright)" entry is the browser
+side and still wanted; these two are the server-to-klams contract.
 
 ## Later (roadmap holds the list)
 

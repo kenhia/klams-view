@@ -21,6 +21,19 @@ run:
     cd web && pnpm build
     bash -c 'set -a; [ -f .env ] && . ./.env; set +a; cargo run'
 
+# Sprint 003 (#809) — live-backend smoke: drive every /api route against
+# a REAL klams, then again with a deliberately wrong token to prove the
+# doctor tells "unreachable" and "unauthorized" apart.
+#
+# Deliberately NOT part of `just check`: the gate has to stay hermetic
+# and tokenless. The CI-runnable half of #809 is
+# `tests/api_contract.rs`, which `cargo test` already covers — it
+# catches klams-view regressions; this catches upstream skew.
+#
+# Read-only. It seeds nothing, so pointing it at the live klams is safe.
+smoke-live *ARGS:
+    bash -c 'set -a; [ -f .env ] && . ./.env; set +a; exec scripts/smoke-live.sh {{ARGS}}'
+
 # Frontend dev server (proxies /api to the rust server on :7779)
 dev-web:
     cd web && pnpm dev

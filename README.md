@@ -34,6 +34,35 @@ just run                # builds the SPA and serves it on :7779
 `/api`). `just check` runs the CI gate: `cargo fmt`/`clippy`/`test`,
 `svelte-check`, prettier, and an SPA build.
 
+## Testing
+
+Two layers, and the split is deliberate:
+
+- **`just check`** — hermetic and tokenless, so CI can run it.
+  `tests/api_contract.rs` boots a stub klams on a loopback port and
+  drives the real `/api` router against it over real HTTP, covering
+  every route, the aggregations, and the error envelopes. It catches
+  regressions in klams-view.
+- **`just smoke-live`** — the same routes against a **real** klams
+  (`KLAMS_URL` / `KLAMS_TOKEN` from `.env`), plus a second instance with
+  a deliberately wrong token to prove the doctor tells "unreachable"
+  and "unauthorized" apart. It catches skew in the *upstream*, which the
+  hermetic layer structurally cannot see. Read-only — it seeds nothing,
+  so pointing it at the live klams is safe.
+
+Run `just smoke-live` before `just publish`: a green run against a newer
+klams is what licenses bumping `KLAMS_VERIFIED_VERSION` in
+`src/doctor.rs`.
+
+## Diagnosing a bad connection
+
+`/health` opens with the connection doctor: `KLAMS_URL` parses →
+`KLAMS_TOKEN` set → DNS → TCP → TLS → unauthenticated `/healthz` →
+**authenticated read** → klams version vs the version klams-view was
+verified against. Each link reports separately, and the one that failed
+carries the fix. The authenticated step is the point — `/healthz` is
+unauthenticated, so it stays green while a stale token fails every read.
+
 ## Deployment
 
 `just deploy` installs it as a systemd unit on the machine you run it from —

@@ -154,18 +154,17 @@ async fn health(State(state): State<AppState>) -> Response {
     }
 }
 
-// ---- status --------------------------------------------------------
+// ---- status: the connection doctor (#808) ---------------------------
 
+/// `/api/status` is the doctor, not a liveness ping: it walks
+/// config → token → dns → tcp → tls → healthz → authed → version and
+/// reports each link with its own fix. The old shape
+/// (`{view, klams: "ok"|"unreachable"|"unconfigured"}`) collapsed
+/// "unreachable" and "the token is stale" into one word, which is the
+/// klams #739 failure this endpoint exists to end. Nothing consumed
+/// that shape — the SPA never called it.
 async fn status(State(state): State<AppState>) -> Response {
-    let klams = if !state.0.klams.has_token() {
-        "unconfigured"
-    } else {
-        match state.0.klams.healthz().await {
-            Ok(_) => "ok",
-            Err(_) => "unreachable",
-        }
-    };
-    Json(json!({ "view": "ok", "klams": klams })).into_response()
+    Json(crate::doctor::run(&state.0.klams).await).into_response()
 }
 
 // ---- aggregations --------------------------------------------------

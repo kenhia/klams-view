@@ -10,10 +10,7 @@ use axum::{Router, routing::get};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
-mod api;
-mod config;
-mod klams;
-mod metrics;
+use klams_view::{api, config};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

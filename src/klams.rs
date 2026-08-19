@@ -31,6 +31,37 @@ impl Client {
         self.token.is_some()
     }
 
+    /// The klams base URL, normalised (no trailing slash). The doctor
+    /// needs it to resolve/connect step by step rather than letting one
+    /// `reqwest` error stand in for the whole chain.
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
+    /// Unauthenticated GET with the transport error left UNwrapped —
+    /// `anyhow` would erase the `reqwest::Error` the doctor classifies
+    /// (connect vs timeout vs TLS).
+    pub async fn probe(&self, path: &str) -> Result<reqwest::Response, reqwest::Error> {
+        self.http.get(format!("{}{path}", self.base)).send().await
+    }
+
+    /// Authenticated GET, same contract. `None` when no token is
+    /// configured — the caller reports that as its own step rather than
+    /// as an auth failure.
+    pub async fn probe_authed(
+        &self,
+        path: &str,
+    ) -> Option<Result<reqwest::Response, reqwest::Error>> {
+        let token = self.token.as_ref()?;
+        Some(
+            self.http
+                .get(format!("{}{path}", self.base))
+                .bearer_auth(token)
+                .send()
+                .await,
+        )
+    }
+
     fn authed(&self, req: reqwest::RequestBuilder) -> anyhow::Result<reqwest::RequestBuilder> {
         let token = self
             .token
