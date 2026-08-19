@@ -74,6 +74,16 @@ purpose — no codegen at this scale).
 - Maintenance 503s use `{error, retry_after_seconds}` — a different
   envelope from `ApiError`.
 - `counts.restores_received` is hardcoded 0 upstream — never chart it.
+- `/v1/authors/{id}/memories` does **not** interleave by `created_at`.
+  It serves the postgres-backed kinds (facts, events) newest-first and
+  *then* the knowledge rows, ascending, across cursor pages. A
+  multi-kind request is therefore not a merged timeline, and an author
+  whose recent writes are all knowledge gets a first page with none of
+  them. `/v1/memories?authors=<uuid>` sorts correctly but caps the
+  window at 30 days, so it is not a drop-in for an all-time history.
+  Found by sprint 003 while building the per-author chart (#807); the
+  author page names the ordering rather than hiding it, and merging it
+  properly is a follow-up.
 
 ## Visual identity
 

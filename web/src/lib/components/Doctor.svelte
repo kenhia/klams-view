@@ -33,6 +33,10 @@
   const o = $derived(OVERALL[report.overall] ?? OVERALL.down);
   const failing = $derived(report.checks.filter((c) => c.state === "fail" || c.state === "warn"));
   const passing = $derived(report.checks.filter((c) => c.state === "ok").length);
+  // A skipped link is not a link that failed to pass — TLS on an http://
+  // URL is "does not apply", and folding it into a denominator reads as
+  // one short of clean forever.
+  const skipped = $derived(report.checks.filter((c) => c.state === "skipped").length);
   const elapsed = $derived(report.checks.reduce((s, c) => s + c.elapsed_ms, 0));
 </script>
 
@@ -44,10 +48,9 @@
     <span style="color:{o.color}" aria-hidden="true">{o.icon}</span>
     <h2 class="text-sm font-semibold">{o.text}</h2>
     <span class="text-xs text-[var(--color-muted)]">
-      {passing}/{report.checks.length} checks pass
-      {#if failing.length}
-        · {failing.map((c) => c.label.toLowerCase()).join(", ")}
-      {/if}
+      {passing} ok{#if skipped}
+        · {skipped} n/a{/if}{#if failing.length}
+        · {failing.map((c) => c.label.toLowerCase()).join(", ")}{/if}
       · {report.view.klams_url}
       {#if report.view.klams_version}· klams {report.view.klams_version}{/if}
       · {elapsed}ms

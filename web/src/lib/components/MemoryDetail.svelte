@@ -100,7 +100,22 @@
     <dt class="text-[var(--color-muted)]">kind</dt>
     <dd>{m.kind}{m.kind === "event" ? ` · ${m.category}` : m.type ? ` · ${m.type}` : ""}</dd>
     <dt class="text-[var(--color-muted)]">author</dt>
-    <dd>{m.author.agent_name}{m.author.model ? ` (${m.author.model})` : ""}</dd>
+    <dd>
+      <!--
+        #807: jump from a memory to its author. Only this branch renders
+        an author — the knowledge branch shows the KnowledgeItem, which
+        carries none, and whose supersede links can navigate to a
+        *different* memory, so `m.author` would stop describing what is
+        on screen.
+      -->
+      {#if m.author.id}
+        <a href="/authors/{m.author.id}" class="hover:text-[var(--color-accent)] hover:underline"
+          >{m.author.agent_name}</a
+        >
+      {:else}
+        {m.author.agent_name}
+      {/if}{m.author.model ? ` (${m.author.model})` : ""}
+    </dd>
     <dt class="text-[var(--color-muted)]">created</dt>
     <dd>{new Date(m.created_at).toLocaleString()}</dd>
     <dt class="text-[var(--color-muted)]">id</dt>

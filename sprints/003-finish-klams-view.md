@@ -88,6 +88,51 @@ rejects, and the one thing that has to keep working is the thing that
 says why. It collapses to one line when all eight links pass and
 self-expands when they do not.
 
+### #807 — the author residuals, plus a defect the work uncovered
+
+**Per-author activity** needed no new endpoint: `/api/activity` already
+bucketed by window, and klams' `authors` filter is a CSV of author
+**UUIDs** (not agent names), so the whole server-side change was
+forwarding a parameter that already existed. `/authors/[id]` gains a
+"Writes over time" section reusing `StackedColumns` (kind identity
+preserved) behind the existing `TimeRange` presets, defaulting to 7d.
+Scanners are included here **against the app-wide default**: the chart is
+scoped to one author, so there is no 1000:1 asymmetry left to hide, and
+an author page for a scanner has to chart something. Measured worst case
+— `kai-scanner`, 7d, 61K-row corpus — is 1.4s; the 100-page cap's
+`truncated`/`covered_since` are surfaced when it bites.
+
+**Memory → author jump.** `MemoryRow` was a single `<button>`, and an
+`<a>` cannot live inside one — so the whole-row click target became a
+sibling layer *underneath* the content rather than a wrapper around it.
+That keeps the author name a real link (middle-click, copy-link,
+keyboard) and the row still opens the drawer anywhere else. `author.id`
+is `Option<Uuid>` upstream and Explore synthesises rows with no author
+at all, so the plain-text fallback is a real case. In `MemoryDetail`
+only the fact/event branch links: the knowledge branch renders a
+`KnowledgeItem`, which carries no author, and its supersede links can
+navigate to a *different* memory — `m.author` would stop describing
+what is on screen.
+
+#### The defect #809's territory turned up
+
+`/v1/authors/{id}/memories?kinds=knowledge,fact,event` does **not**
+interleave by `created_at`. It serves the postgres-backed kinds
+newest-first and *then* the knowledge rows, ascending, across cursor
+pages. For an author with 178 knowledge and 6 events, the first page is
+six events from weeks ago — directly under a new chart saying they wrote
+37 things this week. Not data loss (page 2 has the knowledge), but the
+page read as broken.
+
+`/v1/memories?authors=<uuid>` sorts correctly and is what the chart uses,
+but it caps the window at 30 days, so it is not a drop-in for an all-time
+history. Rather than re-architect the list mid-sprint, the page now
+**names the ordering** when it is actually biting (more pages exist, the
+author has knowledge, and none is on screen) and points at the
+one-checkbox workaround. Recorded in docs/design.md's contract-gotcha
+list; merging it properly in the `/api` layer — which is where this repo
+absorbs klams' quirks — is filed as a follow-up.
+
 ## Shipped
 
 - `src/doctor.rs` — the chain, with 8 unit tests on the skew rules.
@@ -96,8 +141,11 @@ self-expands when they do not.
   (a contract test that reaches through `main.rs` cannot exist).
 - `tests/api_contract.rs` — 17 contract tests, hermetic.
 - `scripts/smoke-live.sh` + `just smoke-live` — 24 live checks.
+- `Writes over time` on `/authors/[id]`; author links in `MemoryRow` and
+  `MemoryDetail`.
 - README gains Testing and "Diagnosing a bad connection"; docs/design.md
-  gains the new `/api/status` row and a testing section.
+  gains the new `/api/status` row, a testing section, and the
+  author-memories ordering gotcha.
 
 ### Verified
 
@@ -110,3 +158,7 @@ self-expands when they do not.
   hand against the live service: wrong token (`authed` fail, 401,
   reachability green), unreachable port (`tcp` fail, everything
   downstream `skipped`), no token (`token` fail, `authed` skipped).
+- Screenshotted headless against the live klams: the doctor panel
+  collapsed to one line on `/health`, and `/authors/[id]` charting 37
+  writes across 7 daily buckets. 20 of 20 rows in Pulse's recent feed
+  carry both an author link and their own open-detail button.
