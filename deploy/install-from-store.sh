@@ -167,6 +167,22 @@ fetch_verified() {
     printf '    checksum OK\n'
 }
 
+# A binary's self-reported version, or empty when it does not have one.
+#
+# `awk '{print $NF}'` alone is not enough, and the 0.1.3 deploy proved it:
+# the outgoing pre-0.1.3 build had no --version flag, so it started up,
+# logged "KLAMS_TOKEN not set — /api routes will return 503" to stdout,
+# and the rotation line recorded its version as "503". The rotation log is
+# the record of what you can roll back to, so it must not invent one.
+report_version() {
+    local field
+    field=$("$1" --version 2>/dev/null | head -1 | awk '{print $NF}') || true
+    case "$field" in
+        [0-9]*.[0-9]*) printf '%s' "$field" ;;
+        *)             : ;;
+    esac
+}
+
 fetch_verified "$BIN_FILE"
 fetch_verified "$WEB_FILE"
 
@@ -176,8 +192,9 @@ chmod 0755 "$WORK/$BIN_FILE"
 # published under the wrong version would otherwise install cleanly and
 # then lie to --version, which is exactly the signal a version floor
 # reads. klams found this defect in its own sprint 042.
-reported=$("$WORK/$BIN_FILE" --version 2>/dev/null | awk '{print $NF}') || true
-[ -n "$reported" ] || fail "$BIN_FILE --version produced nothing — wrong arch, or not a klams-view binary"
+reported=$(report_version "$WORK/$BIN_FILE")
+[ -n "$reported" ] || fail \
+    "$BIN_FILE --version printed no version — wrong arch, or not a klams-view binary"
 [ "$reported" = "$VERSION" ] || fail \
     "$BIN_FILE reports version $reported but was published as $VERSION — the store labelling is wrong, not this host"
 printf '    reports %s\n' "$reported"
@@ -203,7 +220,7 @@ printf '    bundle stamped %s\n' "$web_version"
 
 BIN_DST="$BIN_DST_DIR/$NAME"
 if [ -e "$BIN_DST" ]; then
-    old=$("$BIN_DST" --version 2>/dev/null | awk '{print $NF}' || true)
+    old=$(report_version "$BIN_DST")
     say "rotating $BIN_DST (${old:-unknown}) -> $BIN_DST.prev"
     [ "$DRY_RUN" -eq 0 ] && mv -f "$BIN_DST" "$BIN_DST.prev"
 fi

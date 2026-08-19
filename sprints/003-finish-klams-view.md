@@ -236,3 +236,79 @@ the repo-less bootstrap a verified fetch rather than `curl | bash`.
 - `just publish` / `deploy` / `deploy-remote` each name the store
   variable they need when it is unset, rather than failing as curl or
   ssh noise.
+
+## Follow-ups
+
+- **#1448** — merge klams' kind segments into one `created_at` timeline
+  for the author memory list. Filed from this sprint; the page currently
+  names the ordering rather than fixing it.
+- **The version-parse fix is in the repo but not in 0.1.3.** The real
+  deploy printed `rotating /usr/local/bin/klams-view (503)` — the
+  outgoing pre-0.1.3 binary has no `--version`, so it started up, logged
+  *"KLAMS_TOKEN not set — /api routes will return 503"* to stdout, and
+  `awk '{print $NF}'` read `503` as its version. A rotation line is the
+  record of what you can roll back to, so it must not invent one;
+  `report_version()` now requires a version-shaped answer, with two
+  tests. Not republished as 0.1.4: it is a log-line accuracy fix for a
+  condition that cannot recur on this host (every future outgoing binary
+  reports properly), and churning an immutable version for it buys
+  nothing. It ships with the next release.
+- **`0.1.<sprint>` names the release a sprint *ships*.** If a sprint ever
+  needs a second release it takes the next patch and the number stops
+  being an exact index — the store's history is the truth, not the
+  arithmetic.
+
+## Deployed 2026-08-19
+
+- **`0.1.3` live on kubs0**, deployed with **this sprint's own path** —
+  `just publish` → `just deploy` — not `install-systemd`. Dogfooded on
+  its own ship, as klams did in its sprint 042.
+- Published from a clean tree at `0819489`:
+  `artifacts/klams-view/0.1.3/` holding
+  `klams-view-x86_64-linux`, `klams-view-web.tar.gz`,
+  `install-from-store.sh` and `SHA256SUMS`; `latest` → `0.1.3`.
+  klams-view had **no artifact in the store at all** before this.
+- The published `install-from-store.sh` is byte-identical to the repo
+  copy the tests drive (`d053154e…` both sides) — which is what makes
+  the repo-less bootstrap a verified fetch rather than `curl | bash`.
+- Config changes required: **none**. `/etc/klams-view/klams-view.env`
+  untouched, as the installer promises; the unit was not reinstalled.
+- Rollback targets in place: `/usr/local/bin/klams-view.prev` and
+  `/usr/local/share/klams-view/web.prev` (the pre-sprint pair, which is
+  why `web.prev` has no `VERSION` stamp — nothing before 0.1.3 wrote
+  one). Deeper: nothing older is in the store yet, so the next release
+  is the first one with a store-backed previous version.
+
+### Verified live
+
+Over the tailnet URL, not just localhost:
+
+- `klams-view --version` → `klams-view 0.1.3`;
+  `/usr/local/share/klams-view/web/VERSION` → `0.1.3`. The binary and
+  the bundle agree, which the installer refuses to let them not do.
+- `https://kubs0.…:7779/` → 200; a deep link
+  (`/authors/<uuid>`) → 200, so the `ServeDir::fallback(ServeFile)`
+  contract survived the bundle swap.
+- `/api/status` → `overall: "ok"`, all eight links reported, `authed`
+  **ok** (the step `/healthz` cannot make), `tls` `skipped` (loopback
+  `http://`), `version` ok against klams `0.1.45`.
+- `/api/overview` → `configured: true`, 45 authors, 45 agents, 20 recent
+  rows, klams `0.1.45`.
+- Unit `active` / `enabled` after the restart.
+
+### The defect this sprint fixed, caught one last time on its way out
+
+The dry run and then the real deploy both logged
+`rotating /usr/local/bin/klams-view (unknown) -> …` / `(503)`: the
+installer could not read the outgoing binary's version, because that
+binary is the build without `--version` — exactly the gap `#1013`'s
+label-assertion required closing. Baseline for the record:
+
+```
+$ /usr/local/bin/klams-view --version        # the OLD binary
+Error: binding 127.0.0.1:7779                # tries to start the server
+$ curl -s localhost:7779/api/status          # the OLD status shape
+{"klams":"ok","view":"ok"}
+```
+
+Every future rotation names both versions.

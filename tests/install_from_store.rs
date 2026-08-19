@@ -326,6 +326,61 @@ fn a_mislabelled_binary_is_refused_which_no_checksum_could_catch() {
 }
 
 #[test]
+fn a_binary_that_prints_no_version_is_refused_without_inventing_one() {
+    // The 0.1.3 deploy found this for real: the outgoing pre-0.1.3 build
+    // had no --version flag, so it started up, logged "KLAMS_TOKEN not
+    // set — /api routes will return 503" to stdout, and the rotation line
+    // recorded its version as "503". A rotation log is the record of what
+    // you can roll back to; it must not invent one.
+    let fx = Fixture::new("noversion");
+    fx.publish("0.1.3", "0.1.3", "0.1.3");
+    // Replace the stub with one that behaves like the old binary: it
+    // ignores --version and prints a line whose last field is a number.
+    let bin = fx
+        .version_dir("0.1.3")
+        .join(format!("klams-view-{}", target_suffix()));
+    fs::write(
+        &bin,
+        "#!/bin/sh\necho 'WARN KLAMS_TOKEN not set — /api routes will return 503'\n",
+    )
+    .unwrap();
+    make_executable(&bin);
+    write_sums(&fx.version_dir("0.1.3")); // checksums stay valid
+
+    let out = fx.install(&[]);
+    assert!(!out.status.success());
+    let e = stderr(&out);
+    assert!(e.contains("printed no version"), "{e}");
+    assert!(
+        !e.contains("503"),
+        "the warning text was read as a version: {e}"
+    );
+    assert!(fx.installed_binary_version().is_none());
+}
+
+#[test]
+fn a_rotation_of_a_versionless_binary_says_unknown_not_a_stray_number() {
+    let fx = Fixture::new("rotate-unknown");
+    // Install something version-shaped first...
+    fx.publish("0.1.3", "0.1.3", "0.1.3");
+    assert!(fx.install(&[]).status.success());
+    // ...then make what is installed look like the old, versionless build.
+    fs::write(
+        fx.bin_dir().join("klams-view"),
+        "#!/bin/sh\necho 'WARN /api routes will return 503'\n",
+    )
+    .unwrap();
+    make_executable(&fx.bin_dir().join("klams-view"));
+
+    fx.publish("0.1.4", "0.1.4", "0.1.4");
+    let out = fx.install(&[]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("(unknown) ->"), "{text}");
+    assert!(!text.contains("(503)"), "{text}");
+}
+
+#[test]
 fn a_bundle_stamped_with_a_different_version_is_refused() {
     // Binary 0.1.3, bundle stamped 0.1.2: two different builds published
     // into one version directory. Both checksums verify; the stamps are
