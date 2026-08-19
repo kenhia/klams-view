@@ -1,3 +1,11 @@
+# Machine-local values (KLAMS_TOKEN, KLAMS_STORE_URL, …) live in a
+# gitignored `.env` at the repo root rather than the shell environment.
+# Mirrors klams (sprint 035, #776), and it is what lets the store
+# variables below be read at parse time — `env_var_or_default` sees the
+# process environment, so a recipe sourcing `.env` itself would be too
+# late for a `just` variable.
+set dotenv-load := true
+
 # List available recipes
 default:
     @just --list
