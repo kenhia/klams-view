@@ -65,8 +65,13 @@ unauthenticated, so it stays green while a stale token fails every read.
 
 ## Deployment
 
-`just deploy` installs it as a systemd unit on the machine you run it from —
-see [docs/deploy.md](docs/deploy.md).
+Releases go through the homelab package store: `just publish` puts a
+versioned binary + SPA bundle in the store, and `just deploy` fetches,
+checksum-verifies and installs them on the host you run it from —
+including a check that the binary reports the version it was published
+as. `just install-systemd` owns the system user, config and unit (first
+install and unit changes); `just rollback` swaps both assets back
+together. See [docs/deploy.md](docs/deploy.md).
 
 ## Development
 

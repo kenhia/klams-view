@@ -133,6 +133,65 @@ one-checkbox workaround. Recorded in docs/design.md's contract-gotcha
 list; merging it properly in the `/api` layer — which is where this repo
 absorbs klams' quirks — is filed as a follow-up.
 
+### #1013 — publish then deploy, and the two-asset problem
+
+Copied from klams' sprint 042 (which was written expecting this sprint to
+copy it), with one structural difference that shapes everything:
+**klams-view ships two assets.** klams publishes three independently
+useful binaries under three artifact names; klams-view's binary and SPA
+bundle are never separately useful, so they live under **one** artifact
+name, one version directory, one `latest`.
+
+That difference has consequences the binary-only shape does not carry:
+
+- **Both are fetched and verified before either is installed.** A bad
+  bundle must not leave a new binary in place serving someone else's
+  frontend. `a_tampered_bundle_refuses_the_binary_too` is the test.
+- **The bundle carries a `VERSION` stamp**, checked against the label. A
+  binary and a bundle from different builds published into one version
+  directory pass every checksum and disagree only here. It is also how a
+  host answers "what is installed" with the store unreachable —
+  k-homelab's rule for a degraded `--check`.
+- **`just rollback` moves both or neither**, and refuses when only one
+  `.prev` exists.
+- **Not restarting is louder than it is for klams.** `ServeDir` reads the
+  bundle per request, so the new bundle is served *immediately* by the
+  still-running old binary. The installer says so in as many words, and
+  `just deploy` passes `--restart` because that recipe means "deploy
+  here".
+
+**`klams-view --version` did not exist**, and the installer's
+label-assertion needs it — the same defect klams found in its own 042. On
+the currently deployed build, `klams-view --version` tries to *start the
+server* and dies with `Error: binding 127.0.0.1:7779`. Added as an
+early-out before tracing and config, matching clap's `<name> <version>`
+and `-V` so `awk '{print $NF}'` readers keep working.
+
+**Recipe names moved, deliberately.** `just deploy` now means "install
+from the store on this host" — the path anyone should reach for — and the
+build-from-checkout path is `just install-systemd`, which is also the
+only thing that touches the unit, the system user and
+`/etc/klams-view`. A unit change is not a payload update, and the store
+installer refuses to pretend otherwise.
+
+**Store variables reuse klams' names** (`KLAMS_STORE_URL`,
+`KLAMS_STORE_HOST`), because there is one store: one pair of variables
+per machine beats one pair per repo. Neither has a default (#682/#776).
+
+**Version is `0.1.<sprint>`** — 0.1.3 — adopting klams' convention so a
+deployed version names the sprint that shipped it. The store had no
+`klams-view` artifact at all before this, so 0.1.3 is free.
+
+Tested the way klams tested its own installer, and for the same reason it
+is cheap: **curl speaks `file://`**, so the whole package store is a temp
+directory and 14 tests cover the happy path, `.prev` rotation for both
+assets, version pinning (the rollback path), dry-run, and every refusal —
+tampered binary, tampered bundle, mislabelled binary, mismatched bundle
+stamp, unpublished version, unset store URL, unwritable destination,
+unknown argument — plus that the installer *published* into the artifact
+directory is byte-identical to the one under test, which is what makes
+the repo-less bootstrap a verified fetch rather than `curl | bash`.
+
 ## Shipped
 
 - `src/doctor.rs` — the chain, with 8 unit tests on the skew rules.
@@ -143,9 +202,16 @@ absorbs klams' quirks — is filed as a follow-up.
 - `scripts/smoke-live.sh` + `just smoke-live` — 24 live checks.
 - `Writes over time` on `/authors/[id]`; author links in `MemoryRow` and
   `MemoryDetail`.
+- `klams-view --version` / `-V`, before anything can fail; version 0.1.3.
+- `deploy/install-from-store.sh` + `tests/install_from_store.rs` (14).
+- justfile: `publish`, `deploy` (from the store), `deploy-remote`,
+  `rollback`, `install-systemd`; `[doc(...)]` attributes so
+  `just --list` is readable instead of showing each comment's last line.
 - README gains Testing and "Diagnosing a bad connection"; docs/design.md
   gains the new `/api/status` row, a testing section, and the
-  author-memories ordering gotcha.
+  author-memories ordering gotcha; docs/deploy.md rewritten around
+  publish-then-deploy; `.env.example`, CLAUDE.md and the copilot mirror
+  updated.
 
 ### Verified
 
@@ -162,3 +228,11 @@ absorbs klams' quirks — is filed as a follow-up.
   collapsed to one line on `/health`, and `/authors/[id]` charting 37
   writes across 7 daily buckets. 20 of 20 rows in Pulse's recent feed
   carry both an author link and their own open-detail button.
+- **A full publish→install rehearsal with the real artifacts**, against a
+  `file://` store: the release binary reports 0.1.3, the bundle tars and
+  stamps, checksums verify, both land, and the installed pair serves the
+  shell (200), a deep link (200) and a healthy doctor reporting
+  `view.version = 0.1.3`.
+- `just publish` / `deploy` / `deploy-remote` each name the store
+  variable they need when it is unset, rather than failing as curl or
+  ssh noise.

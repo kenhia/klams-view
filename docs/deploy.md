@@ -6,15 +6,36 @@ built SPA assets, and co-locating it with klams keeps `KLAMS_URL` on
 localhost — no token crossing the network, no second machine to keep in
 sync when the klams API changes.
 
-Everything below is done by `deploy/install-systemd.sh`, which
-`just deploy` runs on the host you invoke it from. Build where you
-deploy; there is no cross-compilation or artefact registry in the loop.
+**Releases go through the homelab package store** (k-homelab
+`docs/deploying.md`, sprint 020): every deploy publishes a versioned
+artifact, and every install pulls from the store — even when the deploy
+is local, as klams-view's is. Sprint 003 (#1013) converted it; before
+that, `just deploy` built from the checkout, which is the pinned-clone
+pattern the store exists to retire.
+
+Two paths, and the split is the point:
+
+| Recipe | Owns | When |
+|---|---|---|
+| `just install-systemd` | the system user, `/etc/klams-view`, the unit | first install on a host; any unit or config change; store unreachable |
+| `just publish` + `just deploy` | the binary and the SPA bundle | every routine release |
+
+Set these once per machine, in the gitignored `.env`:
+
+```sh
+KLAMS_STORE_URL=https://<store-host>:4880   # read from, on every host
+KLAMS_STORE_HOST=<store-host>               # ssh host running kpkg; publish only
+```
+
+Neither has a default. A guessed hostname fails later as a confusing
+`curl` or `ssh` error instead of naming the variable you forgot — the
+same call klams makes.
 
 ## First deploy
 
 ```sh
-just deploy-dry-run      # prints every step, touches nothing
-just deploy              # cargo build --release + pnpm build, then install
+just install-systemd-dry-run   # prints every step, touches nothing
+just install-systemd           # user + config + unit + a build from this checkout
 sudoedit /etc/klams-view/klams-view.env    # set KLAMS_TOKEN
 sudo systemctl restart klams-view
 ```
@@ -90,36 +111,92 @@ throwaway pattern) build a branch binary and run it on 7778 against the
 live datastores. A permanent listener there fails the next bake-off, or
 gets killed to make room for one. klams-view uses `:7779`.
 
-## Upgrades
+## Releasing and upgrading
 
 ```sh
-git pull && just deploy
+just smoke-live          # every /api route against the real klams, first
+just publish             # -> artifacts/klams-view/<version>/
+just deploy              # fetch + verify + install + restart, on this host
 ```
 
-Binary and bundle are both staged and moved into place, and the unit is
-restarted at the end, so a deploy never leaves a new binary serving an
-old bundle. Rollback is manual and deliberate:
+`just publish` refuses a dirty tree — a published version must name a
+commit — and takes the version from `klams-view --version` rather than
+`Cargo.toml`, which is the same label `install-from-store.sh` asserts on
+the way in. The store refuses to overwrite a published version, so bump
+`Cargo.toml` (`0.1.<sprint>`) before republishing.
+
+What a version directory holds:
+
+```
+artifacts/klams-view/<version>/klams-view-x86_64-linux
+artifacts/klams-view/<version>/klams-view-web.tar.gz     (carries VERSION)
+artifacts/klams-view/<version>/install-from-store.sh
+artifacts/klams-view/<version>/SHA256SUMS
+artifacts/klams-view/latest                              -> <version>
+```
+
+klams-view ships **two** assets, which is the one way this differs from
+its sibling klams. Both live under one version and one `latest` — they
+are never separately useful — and `install-from-store.sh` fetches and
+verifies **both before installing either**, so a bad bundle cannot leave
+a new binary in place serving someone else's frontend. It also checks
+that the binary *reports* the version it was published as, and that the
+bundle's `VERSION` stamp agrees: the checksums prove the transfer, these
+prove the label.
+
+The bundle's `VERSION` stamp is also how a host answers "what is
+installed here" with the store unreachable — k-homelab's rule for a
+degraded `--check`.
+
+### On a host with no checkout
 
 ```sh
-sudo mv /usr/local/bin/klams-view.prev /usr/local/bin/klams-view
-sudo rm -rf /usr/local/share/klams-view/web
-sudo mv /usr/local/share/klams-view/web.prev /usr/local/share/klams-view/web
-sudo systemctl restart klams-view
+just deploy-remote <host>
 ```
+
+It fetches `install-from-store.sh` out of the store, verifies it against
+the same `SHA256SUMS` as the payload, and runs it — a verified fetch
+rather than `curl | bash`. The copy-paste equivalent works identically
+from a shell on the target host; see the script's own header.
+
+### Rollback
+
+```sh
+just rollback                    # .prev binary AND .prev bundle, together
+just deploy --version <older>    # any published version, from the store
+```
+
+`just rollback` moves both assets or neither, and refuses if only one
+`.prev` exists — a binary paired with another release's frontend is the
+failure it exists to prevent. The deeper path is the store's version
+history, which is what replaced "rebuild from source and hope".
 
 ## Operating it
 
 ```sh
 systemctl status klams-view
-just deploy-logs                 # journalctl -u klams-view -f
-curl -s localhost:7779/api/status # {"view":"ok","klams":"ok"}
+just deploy-logs                  # journalctl -u klams-view -f
+klams-view --version              # what is installed
+cat /usr/local/share/klams-view/web/VERSION   # ...and which bundle
+curl -s localhost:7779/api/status | jq .      # the connection doctor
 ```
 
-`/api/status` reports the viewer and its view of klams separately —
-`"klams":"unconfigured"` means the token is missing or empty,
-`"unreachable"` means klams is down or `KLAMS_URL` is wrong. The UI
-degrades rather than erroring out: without a token it still renders the
-shell plus public health and metrics.
+`/api/status` is the **connection doctor** (#808). It walks the chain one
+link at a time — `KLAMS_URL` parses → `KLAMS_TOKEN` set → DNS → TCP →
+TLS → unauthenticated `/healthz` → **authenticated read** → klams version
+vs the version klams-view was verified against — and reports each link
+separately, with the fix on the row that failed. It always answers 200,
+because it describes a chain rather than asserting one; the rollup is
+`overall: "ok" | "advisory" | "down"`.
+
+The authenticated step is the point. `/healthz` is unauthenticated, so a
+stale or under-scoped token leaves reachability green while every read
+fails — the 2026-07-28 incident (klams #739) that cost an afternoon. The
+`/health` page renders the doctor above everything else and fetches it
+*separately* from the panels, so it keeps working when they cannot.
+
+The UI still degrades rather than erroring out: without a token it
+renders the shell plus public health and metrics.
 
 The unit is hardened (`ProtectSystem=strict`, `ProtectHome`, a syscall
 filter, no write access anywhere). klams-view writes nothing, so if a
