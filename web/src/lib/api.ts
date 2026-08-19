@@ -2,6 +2,7 @@ import type {
   Activity,
   Author,
   AuthorPage,
+  DoctorReport,
   Health,
   HistorySample,
   KnowledgeItem,
@@ -54,6 +55,13 @@ export function sinceHoursAgo(hours: number): string {
 }
 
 export const api = {
+  /**
+   * The connection doctor (#808). Always answers 200 — it is a report,
+   * not a liveness ping, so a broken chain is described rather than
+   * thrown. That is what lets the Health page render it while every
+   * other call on the page is failing.
+   */
+  status: () => request<DoctorReport>("/api/status"),
   overview: () => request<Overview>("/api/overview"),
   activity: (params: {
     since?: string;

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { page } from "$app/stores";
-  import { api } from "$lib/api";
-  import type { Author, MemoryKind, MemoryRow } from "$lib/types";
+  import { api, sinceHoursAgo } from "$lib/api";
+  import type { Activity, Author, MemoryKind, MemoryRow } from "$lib/types";
   import { KIND_COLOR, KIND_LABEL, KINDS } from "$lib/kinds";
   import MemoryRowView from "$lib/components/MemoryRow.svelte";
   import MemoryDetail from "$lib/components/MemoryDetail.svelte";
   import Drawer from "$lib/components/Drawer.svelte";
+  import StackedColumns from "$lib/components/StackedColumns.svelte";
+  import TimeRange from "$lib/components/TimeRange.svelte";
   import { relTime } from "$lib/format";
 
   let author = $state<Author | null>(null);
@@ -14,6 +16,12 @@
   let kinds = $state<Record<MemoryKind, boolean>>({ knowledge: true, fact: true, event: true });
   let error = $state<string | null>(null);
   let selected = $state<MemoryRow | null>(null);
+  // #807: the profile showed lifetime totals only. /api/activity already
+  // does the windowed bucketing; all it needed was the author filter,
+  // which klams keys by author UUID (not agent_name).
+  let activity = $state<Activity | null>(null);
+  let activityError = $state<string | null>(null);
+  let hours = $state(24 * 7);
 
   const id = $derived($page.params.id ?? "");
   const kindsCsv = $derived(KINDS.filter((k) => kinds[k]).join(","));
@@ -36,12 +44,46 @@
       .catch((e) => (error = String(e)));
   });
 
+  $effect(() => {
+    const span = hours;
+    activity = null;
+    activityError = null;
+    api
+      // Scanners are included here on purpose, against the app-wide
+      // default: this chart is scoped to ONE author, so there is no
+      // 1000:1 asymmetry left to hide — and an author page for a
+      // scanner has to chart something.
+      .activity({
+        since: sinceHoursAgo(span),
+        bucket: span > 72 ? "day" : "hour",
+        authors: id,
+        include_scanners: true,
+      })
+      .then((a) => (activity = a))
+      .catch((e) => (activityError = String(e)));
+  });
+
   async function more() {
     if (!cursor) return;
     const m = await api.authorMemories(id, { limit: 50, cursor, kinds: kindsCsv || undefined });
     rows = [...rows, ...m.memories];
     cursor = m.next_cursor ?? null;
   }
+
+  // klams' /v1/authors/{id}/memories does not interleave by created_at:
+  // it serves the postgres-backed rows (facts, events) newest-first and
+  // *then* the knowledge rows, ascending. So an author whose recent
+  // writes are all knowledge gets a first page with none of them — which
+  // reads as a broken page right under a chart saying they wrote 37
+  // things this week. Say so, precisely, instead of leaving the
+  // contradiction on screen. (Absorbing this properly belongs in the
+  // /api layer; see docs/design.md and the follow-up WI.)
+  const knowledgeOnLaterPages = $derived(
+    !!cursor &&
+      kinds.knowledge &&
+      (author?.counts.knowledge ?? 0) > 0 &&
+      !rows.some((r) => r.kind === "knowledge"),
+  );
 
   const profile = $derived.by(() => {
     if (!author) return [];
@@ -102,6 +144,34 @@
     >
   </div>
 
+  <section
+    class="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+  >
+    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold">
+        Writes over time
+        <span class="font-normal text-[var(--color-muted)]">
+          {activity ? `· ${activity.total.toLocaleString()} in the window` : ""}
+        </span>
+      </h2>
+      <TimeRange value={hours} onchange={(h) => (hours = h)} />
+    </div>
+    {#if activityError}
+      <p class="text-xs" style="color:var(--status-critical)">✕ {activityError}</p>
+    {:else if activity}
+      <StackedColumns buckets={activity.buckets} bucketHours={activity.bucket_hours} height={170} />
+      {#if activity.truncated}
+        <p class="mt-1 text-[10px]" style="color:var(--status-serious)">
+          ▲ the server hit its page-walk cap, so buckets before
+          {activity.covered_since ? relTime(activity.covered_since) : "the covered window"} are partial.
+          Narrow the range for a complete picture.
+        </p>
+      {/if}
+    {:else}
+      <p class="py-6 text-xs text-[var(--color-muted)]">loading…</p>
+    {/if}
+  </section>
+
   <div class="mt-4 flex gap-4 text-xs">
     {#each KINDS as k (k)}
       <label class="inline-flex items-center gap-1.5">
@@ -120,6 +190,13 @@
     {:else}
       <p class="px-2 py-3 text-xs text-[var(--color-muted)]">no memories</p>
     {/each}
+    {#if knowledgeOnLaterPages}
+      <p class="px-2 pt-2 text-[10px] text-[var(--color-muted)]">
+        klams serves this author's facts and events before its
+        {(author?.counts.knowledge ?? 0).toLocaleString()} knowledge rows rather than interleaving them
+        by date — keep loading, or untick Facts and Events to see knowledge first.
+      </p>
+    {/if}
     {#if cursor}
       <button
         class="m-2 rounded border border-[var(--color-border)] px-3 py-1 text-xs hover:bg-[var(--color-surface-hi)]"

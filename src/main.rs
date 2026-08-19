@@ -10,13 +10,38 @@ use axum::{Router, routing::get};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
-mod api;
-mod config;
-mod klams;
-mod metrics;
+use klams_view::{api, config};
+
+/// `--version` / `-V`, answered before anything else can fail.
+///
+/// Sprint 003 (#1013): `install-from-store.sh` asserts that a fetched
+/// binary reports the version it was published as — the one check no
+/// checksum can make, and the signal k-homelab's version floors read. So
+/// this has to work on a host with no config, no `.env`, no reachable
+/// klams and no bundle. Output matches clap's `<name> <version>` so
+/// `awk '{print $NF}'` readers keep working.
+///
+/// klams learned this the hard way in its own sprint 042: its
+/// `--version` ran after config resolution, so on exactly the hosts
+/// being provisioned it exited non-zero with a config error instead of
+/// printing a version.
+fn version_early_out() -> bool {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        Some("--version" | "-V") => {
+            println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            true
+        }
+        _ => false,
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if version_early_out() {
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

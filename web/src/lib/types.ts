@@ -60,6 +60,31 @@ export interface Health {
   [key: string]: unknown;
 }
 
+/** One link in the /api/status connection chain (#808). */
+export type CheckState = "ok" | "warn" | "fail" | "skipped";
+
+export interface DoctorCheck {
+  id: string;
+  label: string;
+  state: CheckState;
+  detail: string;
+  /** Present only when there is something to do about it. */
+  fix?: string;
+  elapsed_ms: number;
+}
+
+export interface DoctorReport {
+  /** Rollup: any fail -> "down", any warn -> "advisory", else "ok". */
+  overall: "ok" | "advisory" | "down";
+  view: {
+    version: string;
+    klams_url: string;
+    klams_verified: string;
+    klams_version?: string;
+  };
+  checks: DoctorCheck[];
+}
+
 export interface AgentSummary {
   id: string;
   agent_name: string;

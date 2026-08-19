@@ -65,6 +65,13 @@ scaffold; design + first real pages in progress.
   `KLAMS_VIEW_STATIC`).
 - `just dev-api` + `just dev-web` — two-terminal dev loop; vite on
   :5174 proxies `/api` to :7779.
+- `just smoke-live` — drives every `/api` route against a **real**
+  klams (`.env`'s `KLAMS_URL`/`KLAMS_TOKEN`) plus a bad-token instance.
+  Read-only, seeds nothing. Not in `just check` — the gate stays
+  hermetic; `tests/api_contract.rs` is the CI-runnable half.
+- `just publish` → the homelab package store, then `just deploy`
+  installs from it on this host. `just install-systemd` owns the unit,
+  user and config; `just rollback` swaps both assets back together.
 
 ### Read first
 

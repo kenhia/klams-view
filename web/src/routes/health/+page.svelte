@@ -5,6 +5,8 @@
   // klams-view process).
   import { api } from "$lib/api";
   import type { Health, HistorySample, MetricsSummary, SubsystemHealth } from "$lib/types";
+  import type { DoctorReport } from "$lib/types";
+  import Doctor from "$lib/components/Doctor.svelte";
   import HealthBadge from "$lib/components/HealthBadge.svelte";
   import LineChart from "$lib/components/LineChart.svelte";
   import StatTile from "$lib/components/StatTile.svelte";
@@ -13,11 +15,22 @@
   let health = $state<Health | null>(null);
   let summary = $state<MetricsSummary | null>(null);
   let samples = $state<HistorySample[]>([]);
+  let doctor = $state<DoctorReport | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(false);
 
   async function refresh() {
     loading = true;
+    // The doctor is fetched SEPARATELY from the panels below, and that
+    // separation is the feature (#808): when klams is unreachable or
+    // the token is stale, every call in the Promise.all rejects — the
+    // one screen that has to keep working is the one that says why.
+    // /api/status answers 200 regardless, because it reports a chain
+    // rather than asserting one.
+    const diagnosis = api
+      .status()
+      .then((d) => (doctor = d))
+      .catch(() => (doctor = null));
     try {
       const [h, s, hist] = await Promise.all([
         api.health(),
@@ -31,6 +44,7 @@
     } catch (e) {
       error = String(e);
     } finally {
+      await diagnosis;
       loading = false;
     }
   }
@@ -84,8 +98,17 @@
 
 <h1 class="text-lg font-semibold">Health</h1>
 
+{#if doctor}
+  <Doctor report={doctor} />
+{/if}
+
 {#if error}
-  <p class="mt-4 text-sm" style="color:var(--status-critical)">✕ {error}</p>
+  <p class="mt-4 text-sm" style="color:var(--status-critical)">
+    ✕ {error}
+    {#if doctor && doctor.overall !== "ok"}
+      <span class="text-[var(--color-muted)]">— see the chain above for which link broke.</span>
+    {/if}
+  </p>
 {/if}
 
 {#if health && summary}
