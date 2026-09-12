@@ -164,3 +164,48 @@ None filed. The two obvious candidates are already owned elsewhere:
 deleting klams' `[[auth.tokens]]` rows is korg:2450 (which `depends_on`
 this slice), and retiring the age-store entries for those tokens is
 k-homelab WI #2456.
+
+## Deployed 2026-09-12
+
+**What shipped:** klams-view **0.1.4** — binary and SPA bundle — published to
+the homelab package store and installed on kubs0 from it (`just publish` →
+`just deploy`). `latest` moved 0.1.3 → 0.1.4. Previous binary and bundle are
+rotated to `.prev`; `just rollback` swaps both back together.
+
+**Ordering, which was the whole risk.** The clearance on korg:2422 fixed the
+sequence and it was followed exactly: publish → deploy → *then* remove
+`KLAMS_TOKEN` from `/etc/klams-view/klams-view.env` → restart → confirm.
+Removing the token first would have taken the live dashboard down, because
+until the new binary is installed the running one still needs it.
+
+`/etc/klams-view` is outside every kaed root, so that edit took the documented
+fallback rather than kaed — the line was deleted without the value being read
+or printed. File perms unchanged (`0640 root:klams-view`). No plaintext backup
+was left behind; the value still exists in klams' own config and the age store
+until korg:2450 deletes it, which is also what a rollback to 0.1.3 would need.
+
+**Verified live, after the token was gone:**
+
+| check | result |
+|---|---|
+| service | `active`, reporting `klams-view 0.1.4` |
+| doctor `/api/status` | `overall: ok` — every link green, TLS skipped (http upstream) |
+| doctor identity row | reports `sending X-Homelab-Agent: klams-view` |
+| doctor authed row | klams accepts `klams-view`, read-scoped |
+| `/api/overview` | `authed: true`; 47 authors, 200118 knowledge, 58 facts, 38 events, 20 recent |
+| SPA shell | `GET /` → 200 |
+| write under this identity | `POST /memory/events` → 403 |
+
+There is now **no credential anywhere in klams-view's configuration**, on this
+host or in the repo, and the dashboard renders end to end. That is #2397's
+acceptance, literally rather than in principle.
+
+### Repaired in passing, at ship time
+
+The version was still `0.1.3` — the same version already published and
+serving as the store's `latest` from sprint 003. Publishing this sprint's code
+under it would have replaced a released artifact's contents in place, leaving
+the store saying `0.1.3` while serving different code. Sprint 003 bumped
+inside its own PR; this sprint missed it. Caught before the publish and fixed
+through its own PR (#5) rather than pushing code straight to `main`, since the
+push-to-main exemption covers the deploy record only.
