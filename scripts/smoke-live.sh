@@ -3,10 +3,10 @@
 #
 #   scripts/smoke-live.sh [--addr 127.0.0.1:PORT] [--release]
 #
-# Starts klams-view against a REAL klams (KLAMS_URL / KLAMS_TOKEN) and
-# drives every /api route end to end, then starts a second instance with
-# a deliberately wrong token and asserts the doctor tells the two
-# failures apart. This is the layer `just check` structurally cannot
+# Starts klams-view against a REAL klams (KLAMS_URL) and drives every
+# /api route end to end, then starts a second instance declaring an
+# identity klams does not know and asserts the doctor tells that apart
+# from an unreachable klams. This is the layer `just check` structurally cannot
 # see: `cargo test` covers klams-view's own decoding against a stub
 # (tests/api_contract.rs), but only a real klams can tell you the
 # upstream still speaks the shapes this layer decodes.
@@ -44,20 +44,13 @@ for cmd in curl jq cargo; do
     command -v "$cmd" >/dev/null 2>&1 || { printf 'ERROR: %s not found\n' "$cmd" >&2; exit 1; }
 done
 
-# KLAMS_TOKEN has no default, the #682 pattern: a guessed value fails
-# later as a 401 that reads like a regression instead of "you did not
-# set the variable". KLAMS_URL keeps its documented default.
+# No required secret any more: the identity is a name with a default,
+# so this smoke needs only a klams to point at. The #682 pattern that
+# guarded KLAMS_TOKEN — never guess a credential, because the guess
+# fails later as a 401 that reads like a regression — has nothing left
+# to guard; klams-view's default IS its real identity.
 : "${KLAMS_URL:=http://localhost:7777}"
-if [ -z "${KLAMS_TOKEN:-}" ]; then
-    cat >&2 <<'EOF'
-ERROR: KLAMS_TOKEN is not set.
-
-This smoke needs a real klams to talk to. Set KLAMS_URL and KLAMS_TOKEN
-(the repo's gitignored .env is the usual home; `just smoke-live` sources
-it), then run again.
-EOF
-    exit 1
-fi
+: "${KLAMS_AGENT:=klams-view}"
 
 WORK=$(mktemp -d)
 PIDS=()
@@ -107,10 +100,10 @@ if [ -f "$REPO_DIR/web/build/index.html" ]; then
     STATIC="$REPO_DIR/web/build"
 fi
 
-# `start <port> <token>` — one klams-view on loopback, log to $WORK.
+# `start <port> <agent>` — one klams-view on loopback, log to $WORK.
 start() {
-    local addr=$1 token=$2 name=$3
-    env KLAMS_URL="$KLAMS_URL" KLAMS_TOKEN="$token" \
+    local addr=$1 agent=$2 name=$3
+    env KLAMS_URL="$KLAMS_URL" KLAMS_AGENT="$agent" \
         KLAMS_VIEW_ADDR="$addr" KLAMS_VIEW_STATIC="$STATIC" \
         "$BIN" >"$WORK/$name.log" 2>&1 &
     PIDS+=($!)
@@ -126,13 +119,13 @@ start() {
     exit 1
 }
 
-# A second port for the bad-token instance; +1 off the first.
+# A second port for the unknown-identity instance; +1 off the first.
 host=${ADDR%:*}
 port=${ADDR##*:}
 BAD_ADDR="$host:$((port + 1))"
 
 printf '==> klams at %s\n' "$KLAMS_URL"
-start "$ADDR" "$KLAMS_TOKEN" good
+start "$ADDR" "$KLAMS_AGENT" good
 BASE="http://$ADDR"
 printf '==> klams-view on %s (static: %s)\n' "$BASE" "${STATIC:-none}"
 
@@ -211,7 +204,7 @@ esac
 
 heading '-- aggregations'
 assert 'overview renders Pulse in one call' /api/overview \
-    '.configured == true
+    '.authed == true
      and (.health.status|type) == "string"
      and (.totals.authors|type) == "number" and .totals.authors > 0
      and (.agents|length) > 0
@@ -325,10 +318,10 @@ else
     advise 'no web/build bundle — skipped the deep-link fallback check (run `pnpm build` in web/)'
 fi
 
-# --- 5. the bad-token instance (the #739 headline case) ---------------
+# --- 5. the unknown-identity instance (the #739 headline case) --------
 
-heading '-- bad token (klams #739 / WI #808)'
-start "$BAD_ADDR" 'deliberately-wrong-token' bad
+heading '-- unknown identity (klams #739 / WI #808)'
+start "$BAD_ADDR" 'deliberately-not-an-allow-listed-agent' bad
 BASE="http://$BAD_ADDR"
 
 assert 'doctor calls it down' /api/status '.overall == "down"'
@@ -338,13 +331,13 @@ assert 'reachability still reads green — the trap, stated out loud' /api/statu
 assert 'the authenticated step is the one that fails' /api/status \
     '(.checks[]|select(.id=="authed")) as $a
      | $a.state == "fail" and ($a.detail|test("401"))
-     and ($a.fix|test("read-scoped grant"))'
+     and ($a.fix|test("read-scoped identity row"))'
 
 code=$(fetch "$BASE" '/api/memories?limit=1')
 if [ "$code" = "401" ] && jq -e '.code == "unauthorized"' "$WORK/body.json" >/dev/null 2>&1; then
     ok 'reads relay 401 unauthorized rather than a flattened 502'
 else
-    bad 'rejected-token relay' "GET /api/memories gave HTTP $code — $(head -c 200 "$WORK/body.json")"
+    bad 'rejected-identity relay' "GET /api/memories gave HTTP $code — $(head -c 200 "$WORK/body.json")"
 fi
 
 # --- verdict ----------------------------------------------------------

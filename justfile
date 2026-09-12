@@ -1,4 +1,4 @@
-# Machine-local values (KLAMS_TOKEN, KLAMS_STORE_URL, …) live in a
+# Machine-local values (KLAMS_URL, KLAMS_STORE_URL, …) live in a
 # gitignored `.env` at the repo root rather than the shell environment.
 # Mirrors klams (sprint 035, #776), and it is what lets the store
 # variables below be read at parse time — `env_var_or_default` sees the

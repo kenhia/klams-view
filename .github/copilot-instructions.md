@@ -51,8 +51,8 @@ over ceremony.
 klams-view is a web viewer + dashboard for the klams memory service —
 a korg-shaped single binary: axum serves the built SvelteKit SPA from
 `web/build` and an `/api/*` aggregation layer that calls the klams
-HTTP API server-side (bearer token stays in the server; the browser
-never sees it). It replaces the parked Tauri `viewport` app with a
+HTTP API server-side (klams-view declares an identity header; the
+browser never talks to klams). It replaces the parked Tauri `viewport` app with a
 dark-themed, chart-forward, tailnet-reachable UI. Status: fresh
 scaffold; design + first real pages in progress.
 
@@ -61,12 +61,12 @@ scaffold; design + first real pages in progress.
 - `just check` — fmt, clippy `-D warnings`, cargo test, svelte-check,
   prettier check, SPA build. This is the CI gate.
 - `just run` — build SPA + run server on `127.0.0.1:7779` (sources
-  `.env`: `KLAMS_URL`, `KLAMS_TOKEN`, `KLAMS_VIEW_ADDR`,
+  `.env`: `KLAMS_URL`, `KLAMS_VIEW_ADDR`,
   `KLAMS_VIEW_STATIC`).
 - `just dev-api` + `just dev-web` — two-terminal dev loop; vite on
   :5174 proxies `/api` to :7779.
 - `just smoke-live` — drives every `/api` route against a **real**
-  klams (`.env`'s `KLAMS_URL`/`KLAMS_TOKEN`) plus a bad-token instance.
+  klams (`.env`'s `KLAMS_URL`) plus an unknown-identity instance.
   Read-only, seeds nothing. Not in `just check` — the gate stays
   hermetic; `tests/api_contract.rs` is the CI-runnable half.
 - `just publish` → the homelab package store, then `just deploy`
@@ -79,12 +79,18 @@ scaffold; design + first real pages in progress.
 - `web/src/routes/+layout.svelte` — nav + shell; `web/src/app.css` —
   the oklch design tokens (dark only, korg-lineage).
 - `sprints/planning/roadmap.md` — where this is going.
-- Cross-repo: a read-only klams clone lives at
-  `/home/ken/tmp-clone/klams` (API truth:
-  `crates/klams-api/src/router.rs`, types: `crates/klams-types`);
-  korg (`/home/ken/tmp-clone/korg`) is the design/deploy pattern
-  donor. The real klams working copy `~/src/ai/klams` has an active
-  sprint — don't read it mid-session, use the tmp-clone.
+- Cross-repo: klams is the API truth
+  (`crates/klams-api/src/router.rs` for routes and their scopes, types
+  in `crates/klams-types`); korg is the design/deploy pattern donor.
+  klams has a working copy on this host at `~/src/ai/klams` — read it
+  **read-only**, and check `git status` first, since it may have a
+  sprint in flight. korg is not on kubs0 at all; reach it through
+  kaed's `kai:src` root. (The `/home/ken/tmp-clone/*` clones this file
+  used to point at are gone.)
+- **The live klams on :7777 is the real API truth.** A working copy can
+  be mid-sprint or behind what is deployed; `curl` settles what the
+  running service actually accepts. That is how the identity-header
+  cutover was verified.
 
 ### Gotchas
 

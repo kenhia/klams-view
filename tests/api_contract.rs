@@ -32,7 +32,7 @@ use tower::ServiceExt;
 
 // ---- the stub klams -------------------------------------------------
 
-const GOOD_TOKEN: &str = "stub-read-token";
+const GOOD_AGENT: &str = "klams-view";
 /// The stub reports the version klams-view is verified against, so the
 /// doctor's skew step is `ok` here and skew is tested on its own.
 const STUB_VERSION: &str = klams_view::doctor::KLAMS_VERIFIED_VERSION;
@@ -202,16 +202,19 @@ fn memory_rows() -> Vec<Value> {
 fn unauthorized() -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        Json(json!({ "code": "unauthorized", "message": "missing or invalid bearer token" })),
+        Json(json!({ "code": "unauthorized", "message": "unknown agent identity" })),
     )
         .into_response()
 }
 
+/// The stub allow-lists one agent name, the way klams allow-lists
+/// `[[auth.identities]]` — an unknown name is refused, which is the
+/// only rejection shape left now the bearer token is gone.
 fn require_token(headers: &HeaderMap) -> bool {
     headers
-        .get("authorization")
+        .get("x-homelab-agent")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == format!("Bearer {GOOD_TOKEN}"))
+        .is_some_and(|v| v == GOOD_AGENT)
 }
 
 async fn stub_healthz(State(s): State<Stub>) -> Response {
@@ -408,12 +411,12 @@ async fn spawn_stub() -> (String, Seen) {
 
 // ---- the klams-view side --------------------------------------------
 
-fn config(klams_url: &str, token: Option<&str>) -> klams_view::config::Config {
+fn config(klams_url: &str, agent: &str) -> klams_view::config::Config {
     klams_view::config::Config {
         listen_addr: "127.0.0.1:0".into(),
         static_dir: None,
         klams_url: klams_url.to_string(),
-        klams_token: token.map(str::to_string),
+        klams_agent: agent.to_string(),
     }
 }
 
@@ -455,7 +458,7 @@ async fn api_post(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
 /// A stub klams plus a klams-view router wired to it, with a good token.
 async fn wired() -> (Router, Seen) {
     let (base, seen) = spawn_stub().await;
-    (view_router(&config(&base, Some(GOOD_TOKEN))), seen)
+    (view_router(&config(&base, GOOD_AGENT)), seen)
 }
 
 // ---- passthroughs ---------------------------------------------------
@@ -522,25 +525,16 @@ async fn a_rejected_token_relays_401_and_names_it_unauthorized() {
     // connection. The passthrough must not flatten it to a 502, or the
     // UI is back to one undifferentiated error string.
     let (base, _) = spawn_stub().await;
-    let app = view_router(&config(&base, Some("wrong-token")));
+    let app = view_router(&config(&base, "not-an-allow-listed-agent"));
     let (status, body) = api_get(&app, "/api/memories?limit=1").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["code"], "unauthorized");
 }
 
 #[tokio::test]
-async fn no_token_configured_is_503_unconfigured_not_a_panic() {
-    let (base, _) = spawn_stub().await;
-    let app = view_router(&config(&base, None));
-    let (status, body) = api_get(&app, "/api/memories?limit=1").await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["code"], "unconfigured");
-}
-
-#[tokio::test]
 async fn an_unreachable_klams_is_a_502_upstream_error() {
     // Port 1 on loopback: nothing listens, and nothing will.
-    let app = view_router(&config("http://127.0.0.1:1", Some(GOOD_TOKEN)));
+    let app = view_router(&config("http://127.0.0.1:1", GOOD_AGENT));
     let (status, body) = api_get(&app, "/api/memories?limit=1").await;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body["code"], "upstream_error");
@@ -554,7 +548,7 @@ async fn overview_sums_authors_and_carries_health_metrics_and_recent() {
     let (status, body) = api_get(&app, "/api/overview").await;
     assert_eq!(status, StatusCode::OK);
 
-    assert_eq!(body["configured"], true);
+    assert_eq!(body["authed"], true);
     assert_eq!(body["health"]["status"], "Ok");
     assert_eq!(body["health"]["version"], STUB_VERSION);
 
@@ -584,7 +578,7 @@ async fn overview_survives_an_unreachable_klams_with_nulls_not_an_error() {
     // Pulse has to render the outage; the unit `[Unit]` comment on the
     // systemd file promises exactly this, and only a live-ish test can
     // check it.
-    let app = view_router(&config("http://127.0.0.1:1", Some(GOOD_TOKEN)));
+    let app = view_router(&config("http://127.0.0.1:1", GOOD_AGENT));
     let (status, body) = api_get(&app, "/api/overview").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["health"]["status"], "Down");
@@ -755,7 +749,7 @@ async fn doctor_reports_every_link_ok_against_a_healthy_klams() {
     assert_eq!(body["overall"], "ok");
     assert_eq!(body["view"]["klams_version"], STUB_VERSION);
     for id in [
-        "config", "token", "dns", "tcp", "healthz", "authed", "version",
+        "config", "identity", "dns", "tcp", "healthz", "authed", "version",
     ] {
         assert_eq!(check(&body, id)["state"], "ok", "check `{id}`");
     }
@@ -772,11 +766,11 @@ async fn doctor_reports_every_link_ok_against_a_healthy_klams() {
 }
 
 #[tokio::test]
-async fn doctor_separates_a_rejected_token_from_an_unreachable_klams() {
+async fn doctor_separates_a_rejected_identity_from_an_unreachable_klams() {
     // This pair IS #808. Same undifferentiated `✕ {error}` before;
     // two different rows, two different fixes, now.
     let (base, _) = spawn_stub().await;
-    let rejected = view_router(&config(&base, Some("wrong-token")));
+    let rejected = view_router(&config(&base, "not-an-allow-listed-agent"));
     let (_, body) = api_get(&rejected, "/api/status").await;
     assert_eq!(body["overall"], "down");
     // Reachability is green — that is the trap, stated out loud.
@@ -793,11 +787,11 @@ async fn doctor_separates_a_rejected_token_from_an_unreachable_klams() {
         authed["fix"]
             .as_str()
             .unwrap()
-            .contains("read-scoped grant"),
+            .contains("read-scoped identity row"),
         "the fix must name the action, not the symptom"
     );
 
-    let dead = view_router(&config("http://127.0.0.1:1", Some(GOOD_TOKEN)));
+    let dead = view_router(&config("http://127.0.0.1:1", GOOD_AGENT));
     let (_, body) = api_get(&dead, "/api/status").await;
     assert_eq!(body["overall"], "down");
     assert_eq!(check(&body, "tcp")["state"], "fail");
@@ -809,23 +803,30 @@ async fn doctor_separates_a_rejected_token_from_an_unreachable_klams() {
 }
 
 #[tokio::test]
-async fn doctor_reports_a_missing_token_as_configuration_not_rejection() {
+async fn doctor_names_the_identity_it_declares() {
+    // What replaced the old "no token configured" step. There is no
+    // unset state to catch any more — the name always has a default —
+    // so the step earns its place by printing the one string an
+    // operator must match against klams' `[[auth.identities]]`. It
+    // must be the *configured* name, not a hardcoded one, or a
+    // mismatched deployment would read as correct.
     let (base, _) = spawn_stub().await;
-    let app = view_router(&config(&base, None));
+    let app = view_router(&config(&base, "some-other-name"));
     let (_, body) = api_get(&app, "/api/status").await;
-    assert_eq!(check(&body, "token")["state"], "fail");
-    assert_eq!(check(&body, "authed")["state"], "skipped");
-    assert!(
-        check(&body, "token")["fix"]
-            .as_str()
-            .unwrap()
-            .contains("KLAMS_TOKEN")
-    );
+    let identity = check(&body, "identity");
+    assert_eq!(identity["state"], "ok");
+    let detail = identity["detail"].as_str().unwrap();
+    assert!(detail.contains("some-other-name"), "{detail}");
+    assert!(detail.contains("X-Homelab-Agent"), "{detail}");
+    // And the authed step is now always really attempted: with no
+    // "unconfigured" case to skip for, a wrong name must show up as
+    // klams refusing it rather than as a step that never ran.
+    assert_eq!(check(&body, "authed")["state"], "fail");
 }
 
 #[tokio::test]
 async fn doctor_reports_an_unparseable_klams_url_without_probing() {
-    let app = view_router(&config("not a url", Some(GOOD_TOKEN)));
+    let app = view_router(&config("not a url", GOOD_AGENT));
     let (status, body) = api_get(&app, "/api/status").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["overall"], "down");

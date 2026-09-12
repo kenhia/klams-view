@@ -79,7 +79,9 @@ if [ -f "$ENV_FILE" ]; then
 else
     run "install -o root -g $GROUP_NAME -m 0640 $SCRIPT_DIR/klams-view.env.example $ENV_FILE"
     printf '\n!! %s was created from the template.\n' "$ENV_FILE"
-    printf '!! Set KLAMS_TOKEN in it, then: systemctl restart %s\n\n' "$UNIT"
+    printf '!! Check KLAMS_URL in it, then: systemctl restart %s\n' "$UNIT"
+    printf '!! No credential to set — klams-view declares its identity\n'
+    printf '!! and klams allow-lists the name read-scoped.\n\n' 
 fi
 
 # --- 3. Binary (rotate prev) ----------------------------------------

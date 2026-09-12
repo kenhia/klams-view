@@ -118,7 +118,7 @@ other:
   `klams-types` and verified against a live klams: this repo is public,
   so no real memory text, path or host goes in it.
 - `scripts/smoke-live.sh` (`just smoke-live`) — the same routes against
-  a real klams, plus a bad-token instance asserting the doctor's 401
+  a real klams, plus an unknown-identity instance asserting the doctor's 401
   path. Read-only; seeds nothing. This is what keeps
   `KLAMS_VERIFIED_VERSION` honest, and the doctor's version step is what
   tells you to re-run it.

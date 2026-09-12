@@ -32,7 +32,7 @@ impl AppState {
             .timeout(std::time::Duration::from_secs(30))
             .build()?;
         Ok(Self(Arc::new(Inner {
-            klams: Client::new(http, &cfg.klams_url, cfg.klams_token.clone()),
+            klams: Client::new(http, &cfg.klams_url, cfg.klams_agent.clone()),
             history: RwLock::new(History::new()),
         })))
     }
@@ -94,12 +94,12 @@ fn err(status: StatusCode, code: &str, message: impl std::fmt::Display) -> Respo
         .into_response()
 }
 
+// Every request now carries an identity, so the old "unconfigured ->
+// 503" branch has no state left to describe: a name klams does not
+// accept comes back as klams' own 401/403 through the relay, which is
+// the honest report. An upstream failure is a bad gateway.
 fn upstream_err(e: anyhow::Error) -> Response {
-    if e.to_string().contains("KLAMS_TOKEN not configured") {
-        err(StatusCode::SERVICE_UNAVAILABLE, "unconfigured", e)
-    } else {
-        err(StatusCode::BAD_GATEWAY, "upstream_error", e)
-    }
+    err(StatusCode::BAD_GATEWAY, "upstream_error", e)
 }
 
 async fn passthrough(state: &AppState, path: &str, query: Option<String>) -> Response {
@@ -172,16 +172,16 @@ async fn status(State(state): State<AppState>) -> Response {
 /// Everything Pulse needs in one call.
 async fn overview(State(state): State<AppState>) -> Response {
     let k = &state.0.klams;
-    let (healthz, metrics_text, authors, recent) =
-        tokio::join!(k.healthz(), k.metrics_text(), walk_authors(k), async {
-            if k.has_token() {
-                k.get_json("/v1/memories", "limit=20").await.map(Some)
-            } else {
-                Ok(None)
-            }
-        });
+    let (healthz, metrics_text, authors, recent) = tokio::join!(
+        k.healthz(),
+        k.metrics_text(),
+        walk_authors(k),
+        k.get_json("/v1/memories", "limit=20")
+    );
 
     let summary = metrics_text.map(|t| summarize(&metrics::parse(&t))).ok();
+
+    let authed = authors.is_ok();
 
     let (totals, agents) = match authors {
         Ok(list) => {
@@ -220,8 +220,11 @@ async fn overview(State(state): State<AppState>) -> Response {
         "metrics": summary,
         "totals": totals,
         "agents": agents,
-        "recent": recent.ok().flatten().map(|v| v["memories"].clone()),
-        "configured": k.has_token(),
+        "recent": recent.ok().map(|v| v["memories"].clone()),
+        // Did klams accept our identity? The banner this drives exists
+        // for the klams #739 shape — /healthz green while every store
+        // read fails — which a rejected identity reproduces exactly.
+        "authed": authed,
     }))
     .into_response()
 }

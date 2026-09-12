@@ -29,8 +29,10 @@
 #                   also owns the system user and /etc/klams-view. A
 #                   unit change is a `just install-systemd`, not a
 #                   payload update.
-#   * config      — /etc/klams-view/klams-view.env carries the klams
-#                   bearer token and must never be clobbered.
+#   * config      — /etc/klams-view/klams-view.env carries this host's
+#                   KLAMS_URL and listen address and must never be
+#                   clobbered. (It no longer holds a credential: klams-view
+#                   authenticates by declared identity, not a token.)
 #   * restart     — only with --restart. Installing and activating are
 #                   separate steps so the caller decides; `just deploy`
 #                   passes it, because that recipe means "deploy here".

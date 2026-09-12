@@ -36,7 +36,7 @@ same call klams makes.
 ```sh
 just install-systemd-dry-run   # prints every step, touches nothing
 just install-systemd           # user + config + unit + a build from this checkout
-sudoedit /etc/klams-view/klams-view.env    # set KLAMS_TOKEN
+sudoedit /etc/klams-view/klams-view.env    # check KLAMS_URL — no credential to set
 sudo systemctl restart klams-view
 ```
 
@@ -46,22 +46,39 @@ What lands where:
 |---|---|
 | `/usr/local/bin/klams-view` | the binary (previous one kept as `.prev`) |
 | `/usr/local/share/klams-view/web` | the SPA bundle (previous one as `web.prev`) |
-| `/etc/klams-view/klams-view.env` | config + token, `0640 root:klams-view` |
+| `/etc/klams-view/klams-view.env` | config (no credential), `0640 root:klams-view` |
 | `/etc/systemd/system/klams-view.service` | the unit |
 
 The env file is written **only if absent**. Re-deploying never
-overwrites it, so the token survives upgrades; conversely, a new setting
-added to `deploy/klams-view.env.example` has to be added by hand on
-hosts that already have one.
+overwrites it, so this host's settings survive upgrades; conversely, a
+new setting added to `deploy/klams-view.env.example` has to be added by
+hand on hosts that already have one.
 
-## The token
+## The identity
 
-Mint klams-view its own `[[auth.tokens]]` grant in klams' config with
-`scopes = ["read"]` rather than reusing an agent's token. Read scope
-covers every endpoint klams-view calls, and giving it a distinct
-identity keeps the dashboard from showing up as one of the agents it is
-reporting on. klams hot-reloads tokens on `systemctl reload
+klams-view has no credential. It authenticates to klams by **declaring
+who it is** — the `X-Homelab-Agent: klams-view` header — and klams
+allow-lists that name read-scoped (program korg:2440: on a single-user
+tailnet a shared token was a name tag, not a lock, so it became one).
+
+Add an identity row to klams' config:
+
+```toml
+[[auth.identities]]
+agent_name = "klams-view"
+scopes = ["read"]
+label = "klams-view"
+```
+
+Nothing is minted, nothing is copied to this host, and nothing goes in
+klams-view's env file. Read scope covers every endpoint klams-view
+calls, and keeping klams-view's own name — rather than borrowing an
+agent's — keeps the dashboard from showing up as one of the agents it
+is reporting on. klams hot-reloads identities on `systemctl reload
 klams-service` — no restart needed.
+
+A name klams does not know is refused with 401, which the doctor
+reports on its own row; see "Diagnosing a broken connection" below.
 
 ## Bind address and tailnet publishing
 
@@ -182,7 +199,7 @@ curl -s localhost:7779/api/status | jq .      # the connection doctor
 ```
 
 `/api/status` is the **connection doctor** (#808). It walks the chain one
-link at a time — `KLAMS_URL` parses → `KLAMS_TOKEN` set → DNS → TCP →
+link at a time — `KLAMS_URL` parses → identity declared → DNS → TCP →
 TLS → unauthenticated `/healthz` → **authenticated read** → klams version
 vs the version klams-view was verified against — and reports each link
 separately, with the fix on the row that failed. It always answers 200,
