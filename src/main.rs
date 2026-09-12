@@ -2,7 +2,7 @@
 //!
 //! One binary, korg-style: serves the built SvelteKit SPA and an
 //! `/api/*` aggregation layer that talks to the klams HTTP API
-//! server-side. The klams bearer token lives here, never in the
+//! server-side. klams-view declares its identity here, never in the
 //! browser.
 
 use anyhow::Context;

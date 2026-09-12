@@ -13,10 +13,15 @@ pub struct Config {
     /// Base URL of the klams service. `KLAMS_URL`, default
     /// `http://localhost:7777`.
     pub klams_url: String,
-    /// Bearer token for klams. `KLAMS_TOKEN`, required for API routes
-    /// to work; startup proceeds without it so the shell can be
-    /// smoke-tested.
-    pub klams_token: Option<String>,
+    /// The identity klams-view declares to klams, sent as
+    /// `X-Homelab-Agent`. `KLAMS_AGENT`, default `klams-view`.
+    ///
+    /// Not a secret (program korg:2440): klams allow-lists the name in
+    /// `[[auth.identities]]` and keeps it read-scoped, so there is no
+    /// value to leak and no "unconfigured" state to degrade into. The
+    /// override exists so the negative path stays testable — a name
+    /// klams does not know must still 401.
+    pub klams_agent: String,
 }
 
 impl Config {
@@ -33,15 +38,15 @@ impl Config {
         };
         let klams_url =
             std::env::var("KLAMS_URL").unwrap_or_else(|_| "http://localhost:7777".into());
-        let klams_token = std::env::var("KLAMS_TOKEN").ok().filter(|t| !t.is_empty());
-        if klams_token.is_none() {
-            tracing::warn!("KLAMS_TOKEN not set — /api routes will return 503");
-        }
+        let klams_agent = std::env::var("KLAMS_AGENT")
+            .ok()
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| "klams-view".into());
         Ok(Self {
             listen_addr,
             static_dir,
             klams_url,
-            klams_token,
+            klams_agent,
         })
     }
 }

@@ -102,12 +102,12 @@
       </span>
     </div>
 
-    {#if !overview.configured}
+    {#if !overview.authed}
       <div
         class="mt-4 rounded border border-[var(--status-serious)] bg-[var(--color-surface)] px-3 py-2 text-sm"
       >
         <span style="color:var(--status-serious)">▲</span>
-        KLAMS_TOKEN is not configured — showing public health and metrics only.
+        klams rejected klams-view's identity — showing public health and metrics only.
       </div>
     {/if}
 
@@ -185,7 +185,7 @@
             {/each}
           </div>
         {:else}
-          <p class="text-xs text-[var(--color-muted)]">needs a configured token</p>
+          <p class="text-xs text-[var(--color-muted)]">needs an accepted identity</p>
         {/if}
       </section>
     </div>

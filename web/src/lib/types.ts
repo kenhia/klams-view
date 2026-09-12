@@ -120,7 +120,8 @@ export interface Overview {
   totals: { facts: number; knowledge: number; events: number; authors: number } | null;
   agents: AgentSummary[] | null;
   recent: MemoryRow[] | null;
-  configured: boolean;
+  /** Did klams accept klams-view's declared identity? */
+  authed: boolean;
 }
 
 export interface ActivityBucket {

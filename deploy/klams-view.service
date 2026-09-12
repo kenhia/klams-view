@@ -16,7 +16,8 @@ Type=simple
 User=klams-view
 Group=klams-view
 ExecStart=/usr/local/bin/klams-view
-# Holds KLAMS_URL / KLAMS_TOKEN / KLAMS_VIEW_ADDR / KLAMS_VIEW_STATIC.
+# Holds KLAMS_URL / KLAMS_VIEW_ADDR / KLAMS_VIEW_STATIC (and optionally
+# KLAMS_AGENT). No credential: klams-view authenticates by declared name.
 # 0640 root:klams-view — it carries the klams bearer token.
 EnvironmentFile=/etc/klams-view/klams-view.env
 Restart=on-failure

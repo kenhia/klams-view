@@ -2,18 +2,19 @@
 //!
 //! The 2026-07-28 viewport incident (klams #739) burned an afternoon
 //! because a stale bearer token presented as "green dashboard, red goo
-//! everywhere else": `/healthz` is unauthenticated, so reachability
+//! everywhere else" (the token is gone — klams-view declares an
+//! identity now — but a name klams does not know fails the same way): `/healthz` is unauthenticated, so reachability
 //! looked fine while every authed call 401'd. klams-view moved the
 //! token server-side, which removed the *user-facing* half of that
 //! failure — the operator-facing half was intact until this module, so
-//! a wrong `KLAMS_TOKEN` and an unreachable `KLAMS_URL` both rendered
+//! a rejected identity and an unreachable `KLAMS_URL` both rendered
 //! as the same undifferentiated `✕ {error}` line.
 //!
 //! So the doctor walks the chain one link at a time and reports each
 //! link separately, with the fix named on the row that failed:
 //!
 //! ```text
-//! config → token → dns → tcp → tls → healthz → authed → version
+//! config → identity → dns → tcp → tls → healthz → authed → version
 //! ```
 //!
 //! Two rules make it worth reading:
@@ -22,8 +23,8 @@
 //!   than reporting a failure it did not observe. One broken link
 //!   explains the rest.
 //! * **The authenticated step is the point.** `/healthz` structurally
-//!   cannot tell you the token works, so the doctor spends a real
-//!   read call on it.
+//!   cannot tell you klams accepts our identity, so the doctor spends
+//!   a real read call on it.
 
 use crate::klams::Client;
 use serde::Serialize;
@@ -35,7 +36,7 @@ use std::time::{Duration, Instant};
 /// patch component moves every klams sprint: a patch difference is an
 /// advisory ("re-run the smoke, then bump this"), a major/minor
 /// difference is a contract break and reads as down.
-pub const KLAMS_VERIFIED_VERSION: &str = "0.1.45";
+pub const KLAMS_VERIFIED_VERSION: &str = "0.1.49";
 
 /// Connect/read budget per step. Deliberately short: the doctor is the
 /// page you open when something is already wrong, so it must answer
@@ -120,7 +121,7 @@ pub struct ViewInfo {
     /// klams-view's own version, so a screenshot names the build.
     pub version: &'static str,
     /// The URL being diagnosed. Never carries credentials — klams
-    /// auth is a bearer header, and the token stays server-side.
+    /// auth is a declared identity, and there is no secret to leak.
     pub klams_url: String,
     /// What `version` skew is measured against.
     pub klams_verified: &'static str,
@@ -186,26 +187,24 @@ pub async fn run(client: &Client) -> Report {
         }
     };
 
-    // ---- token: configured at all? ----------------------------------
-    // Separate from `authed` on purpose: "you never set it" and "klams
-    // rejected it" have completely different fixes, and the incident
-    // was the second one wearing the first one's face.
-    checks.push(if client.has_token() {
-        Check::new(
-            "token",
-            "KLAMS_TOKEN configured",
-            State::Ok,
-            "a token is set (its value never leaves the server)",
-        )
-    } else {
-        Check::new(
-            "token",
-            "KLAMS_TOKEN configured",
-            State::Fail,
-            "no token — every /api route that reads the store returns 503",
-        )
-        .with_fix(TOKEN_FIX)
-    });
+    // ---- identity: which name do we declare? ------------------------
+    // Separate from `authed` on purpose, and it survived the move off
+    // bearer tokens with its job changed rather than removed. There is
+    // no longer an unset state to catch — the name always has a
+    // default — so this step answers the question that replaced it:
+    // *which* name are we sending? That is the one thing an operator
+    // must match against klams' `[[auth.identities]]`, and it is not a
+    // secret, so the doctor can simply print it.
+    checks.push(Check::new(
+        "identity",
+        "Identity declared",
+        State::Ok,
+        format!(
+            "sending `{}: {}` — klams must allow-list that name, read-scoped",
+            crate::klams::AGENT_HEADER,
+            client.agent()
+        ),
+    ));
 
     // ---- dns + tcp: reachability, before HTTP has a say -------------
     let mut addr = None;
@@ -480,19 +479,14 @@ pub async fn run(client: &Client) -> Report {
                 ),
             )
             .timed(started),
-            Ok(None) => Check::skipped(
-                "authed",
-                "Authenticated read",
-                "no KLAMS_TOKEN is configured (see the token step)",
-            ),
-            Ok(Some(Err(e))) => Check::new(
+            Ok(Err(e)) => Check::new(
                 "authed",
                 "Authenticated read",
                 State::Fail,
                 format!("request failed: {}", chain(&e)),
             )
             .timed(started),
-            Ok(Some(Ok(resp))) => {
+            Ok(Ok(resp)) => {
                 let status = resp.status().as_u16();
                 let body = resp.text().await.unwrap_or_default();
                 let code = serde_json::from_str::<serde_json::Value>(&body)
@@ -503,29 +497,36 @@ pub async fn run(client: &Client) -> Report {
                         "authed",
                         "Authenticated read",
                         State::Ok,
-                        format!("GET {AUTH_PROBE_PATH} succeeded — the token is accepted and read-scoped"),
+                        format!(
+                            "GET {AUTH_PROBE_PATH} succeeded — klams accepts `{}` and it is read-scoped",
+                            client.agent()
+                        ),
                     )
                     .timed(started),
                     401 => Check::new(
                         "authed",
                         "Authenticated read",
                         State::Fail,
-                        "klams rejected klams-view's KLAMS_TOKEN (401 unauthorized) — \
-                         reachability is fine, so every page will show data-less errors \
-                         while /healthz stays green"
-                            .to_string(),
+                        format!(
+                            "klams does not know the identity `{}` (401 unauthorized) — \
+                             reachability is fine, so every page will show data-less errors \
+                             while /healthz stays green",
+                            client.agent()
+                        ),
                     )
-                    .with_fix(TOKEN_REJECTED_FIX)
+                    .with_fix(IDENTITY_REJECTED_FIX)
                     .timed(started),
                     403 => Check::new(
                         "authed",
                         "Authenticated read",
                         State::Fail,
-                        "the token authenticated but is under-scoped (403 forbidden) — \
-                         klams-view needs `read`"
-                            .to_string(),
+                        format!(
+                            "klams knows `{}` but it is under-scoped (403 forbidden) — \
+                             klams-view needs `read`",
+                            client.agent()
+                        ),
                     )
-                    .with_fix(TOKEN_REJECTED_FIX)
+                    .with_fix(IDENTITY_REJECTED_FIX)
                     .timed(started),
                     503 => Check::new(
                         "authed",
@@ -587,14 +588,11 @@ const AUTH_PROBE_PATH: &str = "/v1/authors?limit=1";
 const CONFIG_FIX: &str = "set KLAMS_URL to klams' base URL (e.g. http://localhost:7777) in \
      /etc/klams-view/klams-view.env, then `systemctl restart klams-view`";
 
-const TOKEN_FIX: &str = "mint a read-scoped grant in /etc/klams/klams.toml and reload klams \
-     (`systemctl reload klams-service`), put it in KLAMS_TOKEN in \
-     /etc/klams-view/klams-view.env, then `systemctl restart klams-view`";
-
-const TOKEN_REJECTED_FIX: &str = "mint a read-scoped grant for klams-view in /etc/klams/klams.toml and reload klams \
-     (`systemctl reload klams-service`), then replace KLAMS_TOKEN in \
-     /etc/klams-view/klams-view.env and `systemctl restart klams-view`. Use klams-view's \
-     own grant rather than an agent's, so it shows up as itself in klams' author views.";
+const IDENTITY_REJECTED_FIX: &str = "add a read-scoped identity row for klams-view to /etc/klams/klams.toml \
+     ([[auth.identities]] with agent_name = \"klams-view\", scopes = [\"read\"]) and reload \
+     klams (`systemctl reload klams-service`). Nothing is minted and nothing goes in \
+     klams-view's env file — the name is the whole credential. Keep klams-view's own name \
+     rather than borrowing an agent's, so it shows up as itself in klams' author views.";
 
 fn tcp_fix(port: Option<u16>) -> String {
     format!(

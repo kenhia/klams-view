@@ -8,16 +8,18 @@ workbench that exposes ranking, and curation surfaces (dissents) — in a
 dark-themed web UI you can open from any browser that can reach it.
 
 It follows the korg deployment shape: one Rust (axum) binary that serves the
-built SvelteKit SPA and talks to the klams HTTP API server-side, holding the
-bearer token so the browser never sees it. The server also computes the
-aggregations the klams API doesn't expose directly.
+built SvelteKit SPA and talks to the klams HTTP API server-side, so the browser
+never talks to klams at all. The server also computes the aggregations the
+klams API doesn't expose directly.
 
 - `src/` — the axum server (static bundle + `/api/*` aggregation layer)
 - `web/` — SvelteKit (Svelte 5 + Tailwind 4) static SPA
 
-klams-view is **read-only**: it needs nothing beyond a read-scoped klams token.
-It has no authentication of its own, so treat "who can reach the port" as "who
-can read the memory store", and choose the bind address accordingly.
+klams-view is **read-only**, and holds no credential: it authenticates to klams
+by declaring its identity (`X-Homelab-Agent: klams-view`), which klams
+allow-lists read-scoped. It has no authentication of its own, so treat "who can
+reach the port" as "who can read the memory store", and choose the bind address
+accordingly.
 
 ## Quick start
 
@@ -25,7 +27,7 @@ You need a reachable klams instance, a Rust toolchain, and
 [pnpm](https://pnpm.io) plus [just](https://github.com/casey/just).
 
 ```sh
-cp .env.example .env    # then set KLAMS_URL and KLAMS_TOKEN
+cp .env.example .env    # then set KLAMS_URL — there is no token to set
 just run                # builds the SPA and serves it on :7779
 ```
 
@@ -44,8 +46,8 @@ Two layers, and the split is deliberate:
   every route, the aggregations, and the error envelopes. It catches
   regressions in klams-view.
 - **`just smoke-live`** — the same routes against a **real** klams
-  (`KLAMS_URL` / `KLAMS_TOKEN` from `.env`), plus a second instance with
-  a deliberately wrong token to prove the doctor tells "unreachable"
+  (`KLAMS_URL` from `.env`), plus a second instance declaring an
+  identity klams does not know, to prove the doctor tells "unreachable"
   and "unauthorized" apart. It catches skew in the *upstream*, which the
   hermetic layer structurally cannot see. Read-only — it seeds nothing,
   so pointing it at the live klams is safe.
@@ -57,7 +59,7 @@ klams is what licenses bumping `KLAMS_VERIFIED_VERSION` in
 ## Diagnosing a bad connection
 
 `/health` opens with the connection doctor: `KLAMS_URL` parses →
-`KLAMS_TOKEN` set → DNS → TCP → TLS → unauthenticated `/healthz` →
+identity declared → DNS → TCP → TLS → unauthenticated `/healthz` →
 **authenticated read** → klams version vs the version klams-view was
 verified against. Each link reports separately, and the one that failed
 carries the fix. The authenticated step is the point — `/healthz` is
