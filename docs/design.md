@@ -48,7 +48,8 @@ and `is_scanner` in `src/api.rs` — the two must agree.
 | `GET /api/overview` | authors + healthz + metrics + `/v1/memories` first page | one call renders Pulse |
 | `GET /api/activity?since&until&kinds&authors&state&bucket&include_scanners` | pages `/v1/memories` server-side | returns time buckets by kind plus per-agent counts; page fetch capped, cap reported. `include_scanners=false` drops `*-scanner` authors from the counts — the walk still pages over them (klams has no exclude-author filter), and they still move `covered_since`, so coverage keeps describing the walk rather than the filter |
 | `GET /api/memories?…` | `/v1/memories` passthrough | table + cursor |
-| `GET /api/authors`, `/api/authors/{id}`, `/api/authors/{id}/memories` | passthrough | |
+| `GET /api/authors`, `/api/authors/{id}` | passthrough | |
+| `GET /api/authors/{id}/memories?limit&cursor&kinds&state` | walks `/v1/memories?authors=` server-side | one newest-first all-time timeline. klams' own author route serves kind *sections* (facts, events, then knowledge **ascending**), so this walks `/v1/memories`' 30-day window backwards to the author's `created_at` and merges there instead; composite cursor packs window + upstream cursor. Sprint 005 (#1448) — see the ordering gotcha below |
 | `POST /api/search` | `/memory/search` passthrough | |
 | `GET /api/knowledge/{id}` | passthrough | richest knowledge shape |
 | `GET /api/health` | `/healthz` passthrough | full snapshot |
