@@ -155,3 +155,20 @@ raises an advisory rather than silently reporting a check that could not fail.
 ## Follow-ups
 
 None outstanding in this repo.
+
+## Deployed
+
+**Not deployed.** Merged to `main` as `a207b92`; the running service on this
+host is still **0.1.4**, which predates this sprint, so the author page in use
+still shows the kind-segmented list.
+
+This is not an omission by sprint-ship: klams-view declares no `.sprint-deploy`,
+so its Phase 7 skipped, exactly as it did for every previous sprint here —
+004's deploy was a separate deliberate act with its own record. Shipping this
+one needs `just publish` (a version bump past 0.1.4) and `just deploy` (a sudo
+restart of the tailnet-published service), which is Ken's call rather than a
+leg's, and outside the overseer's clearance for this slice (korg:3055 comment
+2886: "through the merge, the local reset, and whatever this repo declares for
+deploy").
+
+To put it live: bump `Cargo.toml` to 0.1.5, `just publish`, then `just deploy`.
