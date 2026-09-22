@@ -70,21 +70,6 @@
     cursor = m.next_cursor ?? null;
   }
 
-  // klams' /v1/authors/{id}/memories does not interleave by created_at:
-  // it serves the postgres-backed rows (facts, events) newest-first and
-  // *then* the knowledge rows, ascending. So an author whose recent
-  // writes are all knowledge gets a first page with none of them — which
-  // reads as a broken page right under a chart saying they wrote 37
-  // things this week. Say so, precisely, instead of leaving the
-  // contradiction on screen. (Absorbing this properly belongs in the
-  // /api layer; see docs/design.md and the follow-up WI.)
-  const knowledgeOnLaterPages = $derived(
-    !!cursor &&
-      kinds.knowledge &&
-      (author?.counts.knowledge ?? 0) > 0 &&
-      !rows.some((r) => r.kind === "knowledge"),
-  );
-
   const profile = $derived.by(() => {
     if (!author) return [];
     return [
@@ -190,13 +175,6 @@
     {:else}
       <p class="px-2 py-3 text-xs text-[var(--color-muted)]">no memories</p>
     {/each}
-    {#if knowledgeOnLaterPages}
-      <p class="px-2 pt-2 text-[10px] text-[var(--color-muted)]">
-        klams serves this author's facts and events before its
-        {(author?.counts.knowledge ?? 0).toLocaleString()} knowledge rows rather than interleaving them
-        by date — keep loading, or untick Facts and Events to see knowledge first.
-      </p>
-    {/if}
     {#if cursor}
       <button
         class="m-2 rounded border border-[var(--color-border)] px-3 py-1 text-xs hover:bg-[var(--color-surface-hi)]"

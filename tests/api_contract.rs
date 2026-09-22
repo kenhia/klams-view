@@ -123,7 +123,7 @@ fn authors() -> Value {
                 "repo": "klams-view",
                 "client_app": "claude-code",
                 "client_version": "2.0.0",
-                "created_at": "2026-08-01T00:00:00Z",
+                "created_at": "2026-06-01T00:00:00Z",
                 "last_seen_at": "2026-08-19T06:00:00Z",
                 "counts": { "writes": 4, "knowledge": 9, "events": 2,
                             "soft_deletes": 1, "restores_received": 0 },
@@ -196,6 +196,38 @@ fn memory_rows() -> Vec<Value> {
             "state": "deleted",
             "deleted_at": "2026-08-18T10:00:00Z",
         }),
+        // The three below are #1448's fixture: AUTHOR_A's history runs
+        // back to 2026-06, so one page of their timeline cannot come
+        // from a single 30-day window, and the kinds alternate so a
+        // per-kind *section* order is distinguishable from a merged one.
+        json!({
+            "id": "01a00000-0000-7000-8000-000000000005",
+            "kind": "knowledge",
+            "author": { "id": AUTHOR_A, "agent_name": "claude" },
+            "created_at": "2026-07-20T12:00:00Z",
+            "updated_at": "2026-07-20T12:00:00Z",
+            "tags": [],
+            "text": "a chunk from two windows back",
+        }),
+        json!({
+            "id": "01a00000-0000-7000-8000-000000000006",
+            "kind": "event",
+            "author": { "id": AUTHOR_A, "agent_name": "claude" },
+            "created_at": "2026-06-25T08:00:00Z",
+            "updated_at": "2026-06-25T08:00:00Z",
+            "tags": [],
+            "category": "deploy",
+            "payload": { "n": 2 },
+        }),
+        json!({
+            "id": "01a00000-0000-7000-8000-000000000007",
+            "kind": "knowledge",
+            "author": { "id": AUTHOR_A, "agent_name": "claude" },
+            "created_at": "2026-06-05T00:00:00Z",
+            "updated_at": "2026-06-05T00:00:00Z",
+            "tags": [],
+            "text": "the oldest chunk this author has",
+        }),
     ]
 }
 
@@ -247,6 +279,28 @@ async fn stub_memories(
             .map(|t| t.with_timezone(&chrono::Utc))
     };
     let (since, until) = (bound("since"), bound("until"));
+
+    // klams caps the *width* of the window at `memories_max_window_days`
+    // and 400s above it. The stub enforces it because that cap is the
+    // entire reason the author timeline (#1448) walks windows backwards
+    // — a stub that ignored it would let a naive all-time request pass
+    // here and fail only against a real klams.
+    if let (Some(s), Some(u)) = (since, until)
+        && u - s > chrono::Duration::days(30)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "code": "window_too_large",
+                "message": "requested window exceeds configured maximum of 30 days",
+                "field": "until",
+                "window_max_days": 30,
+            })),
+        )
+            .into_response();
+    }
+
+    let want_kinds: Option<Vec<&str>> = q.get("kinds").map(|csv| csv.split(',').collect());
     let rows: Vec<Value> = s
         .memories
         .iter()
@@ -254,6 +308,10 @@ async fn stub_memories(
             Some(ids) => m["author"]["id"]
                 .as_str()
                 .is_some_and(|id| ids.contains(&id)),
+            None => true,
+        })
+        .filter(|m| match &want_kinds {
+            Some(ks) => m["kind"].as_str().is_some_and(|k| ks.contains(&k)),
             None => true,
         })
         .filter(|m| {
@@ -264,11 +322,27 @@ async fn stub_memories(
                 return true;
             };
             let t = t.with_timezone(&chrono::Utc);
-            since.is_none_or(|s| t >= s) && until.is_none_or(|u| t <= u)
+            // Half-open [since, until), matching klams' SQL — which is
+            // what lets consecutive windows tile with no overlap and no
+            // gap, so the walk needs no epsilon arithmetic.
+            since.is_none_or(|s| t >= s) && until.is_none_or(|u| t < u)
         })
         .cloned()
         .collect();
-    Json(json!({ "memories": rows, "next_cursor": Value::Null })).into_response()
+
+    // Opaque-to-the-caller cursor. klams' is a `(created_at, id)`
+    // keyset; an index is equivalent over a fixed fixture, and
+    // klams-view must treat either as a token it never parses.
+    let offset: usize = q.get("cursor").and_then(|c| c.parse().ok()).unwrap_or(0);
+    let limit: usize = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let total = rows.len();
+    let page: Vec<Value> = rows.into_iter().skip(offset).take(limit).collect();
+    let next = if offset + page.len() < total {
+        Value::String((offset + page.len()).to_string())
+    } else {
+        Value::Null
+    };
+    Json(json!({ "memories": page, "next_cursor": next })).into_response()
 }
 
 async fn stub_authors(State(s): State<Stub>, headers: HeaderMap) -> Response {
@@ -469,7 +543,7 @@ async fn memories_authors_and_knowledge_relay_upstream_shapes_verbatim() {
 
     let (status, body) = api_get(&app, "/api/memories?limit=200").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["memories"].as_array().unwrap().len(), 4);
+    assert_eq!(body["memories"].as_array().unwrap().len(), 7);
     // Flattened content, absent-not-null, and the author ref carries an
     // id — the three facts the frontend types are written against.
     let first = &body["memories"][0];
@@ -487,14 +561,191 @@ async fn memories_authors_and_knowledge_relay_upstream_shapes_verbatim() {
     assert_eq!(body["agent_name"], "claude");
     assert_eq!(body["counts"]["knowledge"], 9);
 
-    let (status, body) = api_get(&app, &format!("/api/authors/{AUTHOR_A}/memories?limit=50")).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["memories"].as_array().unwrap().len(), 3);
-
     let (status, body) = api_get(&app, "/api/knowledge/01a00000-0000-7000-8000-000000000001").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["content_hash"].is_string());
     assert_eq!(body["source"], "Scanner");
+}
+
+// ---- the author memory timeline (#1448) -----------------------------
+
+/// Pull `since`/`until` back out of a line `Seen` recorded, so a test
+/// can assert the *shape of the upstream request* rather than trusting
+/// that a right-looking response was right for the right reason.
+fn window_of(line: &str) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+    let param = |key: &str| -> Option<chrono::DateTime<chrono::Utc>> {
+        line.split(['?', '&'])
+            .find_map(|kv| kv.strip_prefix(&format!("{key}=")))
+            .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+            .map(|t| t.with_timezone(&chrono::Utc))
+    };
+    Some((param("since")?, param("until")?))
+}
+
+#[tokio::test]
+async fn the_author_timeline_is_one_newest_first_merge_not_kind_segments() {
+    // The headline of #1448. klams' own `/v1/authors/{id}/memories`
+    // emits facts, then events, then knowledge — the knowledge section
+    // *ascending* — so an author's first page was their oldest chunks.
+    // This route must return one timeline ordered by `created_at`.
+    let (app, seen) = wired().await;
+    let (status, body) = api_get(&app, &format!("/api/authors/{AUTHOR_A}/memories?limit=50")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rows = body["memories"].as_array().unwrap();
+    assert_eq!(rows.len(), 6, "every one of this author's rows, all-time");
+
+    // Alternating kinds: a per-kind section order cannot produce this,
+    // which is what makes the assertion worth making.
+    let kinds: Vec<&str> = rows.iter().map(|m| m["kind"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "fact",
+            "event",
+            "knowledge",
+            "knowledge",
+            "event",
+            "knowledge"
+        ],
+    );
+
+    let times: Vec<chrono::DateTime<chrono::Utc>> = rows
+        .iter()
+        .map(|m| {
+            chrono::DateTime::parse_from_rfc3339(m["created_at"].as_str().unwrap())
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        })
+        .collect();
+    assert!(
+        times.windows(2).all(|w| w[0] > w[1]),
+        "not strictly newest-first: {times:?}",
+    );
+
+    // The oldest row is four months back — proof the 30-day window cap
+    // bounded the *requests* and not the history returned.
+    assert_eq!(rows[5]["id"], "01a00000-0000-7000-8000-000000000007");
+
+    // And the segmented endpoint is not used at all any more.
+    assert!(
+        seen.matching("/v1/authors/")
+            .iter()
+            .all(|l| !l.contains("/memories")),
+        "still calling the kind-segmented endpoint: {:?}",
+        seen.matching("/v1/authors/"),
+    );
+}
+
+#[tokio::test]
+async fn the_author_timeline_never_asks_klams_for_more_than_a_30_day_window() {
+    // The trap this item walked into once: `/v1/memories?authors=` sorts
+    // correctly but caps the window at 30 days, so proxying to it
+    // silently truncates an all-time list. The stub 400s an over-wide
+    // window, so an OK response already proves the cap was respected —
+    // assert the windows anyway, so a future change that widens them
+    // fails here with the reason rather than somewhere downstream.
+    let (app, seen) = wired().await;
+    let (status, _) = api_get(&app, &format!("/api/authors/{AUTHOR_A}/memories?limit=50")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let calls = seen.matching("GET /v1/memories");
+    assert!(
+        calls.len() >= 2,
+        "a four-month history cannot come from one window: {calls:?}",
+    );
+    for line in &calls {
+        let (since, until) = window_of(line).unwrap_or_else(|| panic!("no window in {line}"));
+        assert!(
+            until - since <= chrono::Duration::days(30),
+            "window wider than klams allows: {line}",
+        );
+        assert!(until > since, "inverted window: {line}");
+    }
+}
+
+#[tokio::test]
+async fn the_composite_cursor_pages_the_timeline_without_gaps_or_repeats() {
+    // One opaque token to the browser, covering both which window we are
+    // in and klams' own cursor inside it. Walked at limit=2 so the page
+    // boundary lands mid-window as well as on a window edge.
+    let (app, _) = wired().await;
+    let mut ids: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    for _ in 0..12 {
+        let uri = match &cursor {
+            Some(c) => format!("/api/authors/{AUTHOR_A}/memories?limit=2&cursor={c}"),
+            None => format!("/api/authors/{AUTHOR_A}/memories?limit=2"),
+        };
+        let (status, body) = api_get(&app, &uri).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body["memories"].as_array().unwrap().len() <= 2,
+            "limit not honoured",
+        );
+        for m in body["memories"].as_array().unwrap() {
+            ids.push(m["id"].as_str().unwrap().to_string());
+        }
+        cursor = body["next_cursor"].as_str().map(str::to_string);
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    assert!(cursor.is_none(), "paging never terminated: {ids:?}");
+    let mut unique = ids.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(ids.len(), 6, "wrong number of rows across pages: {ids:?}");
+    assert_eq!(unique.len(), 6, "a row was served twice: {ids:?}");
+}
+
+#[tokio::test]
+async fn the_author_timeline_forwards_the_kind_filter_and_stays_ordered() {
+    let (app, seen) = wired().await;
+    let (status, body) = api_get(
+        &app,
+        &format!("/api/authors/{AUTHOR_A}/memories?limit=50&kinds=knowledge"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = body["memories"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|m| m["kind"] == "knowledge"));
+    assert!(
+        seen.matching("GET /v1/memories")
+            .iter()
+            .all(|l| l.contains("kinds=knowledge")),
+        "the kind filter was not forwarded upstream",
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_author_is_a_404_from_the_timeline_too() {
+    // The timeline resolves the author first — for the `created_at`
+    // floor that stops the walk — so an unknown id must still be a 404
+    // and not an empty timeline or a 502.
+    let (app, _) = wired().await;
+    let (status, body) = api_get(
+        &app,
+        "/api/authors/019f0000-0000-7000-8000-0000000000ff/memories",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "not_found");
+}
+
+#[tokio::test]
+async fn a_corrupt_timeline_cursor_is_a_400_not_a_500() {
+    let (app, _) = wired().await;
+    let (status, body) = api_get(
+        &app,
+        &format!("/api/authors/{AUTHOR_A}/memories?cursor=not-a-cursor"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "bad_cursor");
 }
 
 #[tokio::test]
@@ -565,7 +816,7 @@ async fn overview_sums_authors_and_carries_health_metrics_and_recent() {
     assert_eq!(agents[0]["facts"], 4);
     assert!(agents[0]["id"].is_string());
 
-    assert_eq!(body["recent"].as_array().unwrap().len(), 4);
+    assert_eq!(body["recent"].as_array().unwrap().len(), 7);
 
     // Metrics come from the prometheus text, quantiles included.
     assert_eq!(body["metrics"]["queue"]["depth"], 3.0);

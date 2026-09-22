@@ -9,6 +9,7 @@ description = "Web viewer and dashboard for the klams memory service"
 [dependencies]
 anyhow = "1"
 axum = "0.8"
+base64 = "0.22"
 bytes = "1"
 chrono = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
