@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 /// patch component moves every klams sprint: a patch difference is an
 /// advisory ("re-run the smoke, then bump this"), a major/minor
 /// difference is a contract break and reads as down.
-pub const KLAMS_VERIFIED_VERSION: &str = "0.1.49";
+pub const KLAMS_VERIFIED_VERSION: &str = "0.1.52";
 
 /// Connect/read budget per step. Deliberately short: the doctor is the
 /// page you open when something is already wrong, so it must answer

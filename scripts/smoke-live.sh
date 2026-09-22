@@ -278,6 +278,58 @@ else
     bad 'author chaining' 'could not read an author id out of /api/authors'
 fi
 
+# #1448 — the author timeline merges klams' kind segments into one
+# newest-first list. Three things make this check worth its length.
+#
+# The author has to be chosen, not taken. `/api/authors` leads with a
+# facts-only author here, and *any* ordering assertion passes on a
+# single-kind list — including against the bug. So require more than
+# one kind, and say so out loud when the store has none rather than
+# reporting a check that could not have failed.
+#
+# It also has to be an author that wrote recently, which is not the
+# same as one seen recently: the busiest multi-kind author here was
+# last *seen* minutes ago and last *wrote* two months ago. So walk the
+# candidates and take the first with a row inside the window.
+#
+# And the assertion has to be against an independently-known answer.
+# The old endpoint served whole kind SECTIONS, one page each, so a
+# single page was usually ordered fine within itself — the bug only
+# showed across pages, as a first page of old rows under a chart of
+# this week's writes. `/api/memories?authors=` is klams' own merge and
+# knows the true newest row, so compare against that. Measured on this
+# store: the old endpoint led with 2026-09-13 where the newest row was
+# 2026-09-22, so this check does fail on the behaviour it replaced.
+mixed_authors=$(value '/api/authors?limit=200' \
+    '[ .authors[]
+       | select([(.counts.knowledge>0),(.counts.events>0),(.counts.writes>0)]
+                | map(select(.)) | length > 1)
+       | {id, n: (.counts.knowledge + .counts.events + .counts.writes)} ]
+     | sort_by(.n) | reverse | .[0:10][].id')
+mixed_author=''
+newest=''
+for cand in $mixed_authors; do
+    t=$(value "/api/memories?authors=$cand&limit=1&since=$since30d" \
+        '.memories[0].created_at // empty')
+    if [ -n "$t" ]; then
+        mixed_author=$cand
+        newest=$t
+        break
+    fi
+done
+if [ -z "$mixed_author" ]; then
+    advise "no multi-kind author wrote inside 30d — #1448's merge is untested live"
+else
+    assert 'author timeline leads with the newest row, not a kind section (#1448)' \
+        "/api/authors/$mixed_author/memories?limit=50&kinds=knowledge,fact,event" \
+        "(.memories[0].created_at) == \"$newest\""
+    # Whole seconds, so a tie inside one second cannot fail it; the
+    # ordering this guards against jumps back by weeks.
+    assert 'author timeline stays newest-first across kinds (#1448)' \
+        "/api/authors/$mixed_author/memories?limit=50&kinds=knowledge,fact,event" \
+        '[.memories[].created_at | .[0:19]] | . == (sort | reverse)'
+fi
+
 # `author.id` is what the memory -> author jump links to (#807). It is
 # Option<Uuid> upstream — absent only when the author could not be
 # resolved — so a store where it is missing everywhere would silently

@@ -128,12 +128,192 @@ async fn author(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     passthrough(&state, &format!("/v1/authors/{id}"), None).await
 }
 
+// ---- the author memory timeline (#1448) -----------------------------
+
+/// klams' `memories_max_window_days`. The cap is on the **width** of
+/// `since..until`, not on how far back the pair may sit, which is the
+/// whole reason a walk works at all.
+const KLAMS_WINDOW_DAYS: i64 = 30;
+
+/// A stop so a bad floor cannot spin forever. 120 windows is ~10 years,
+/// far past any corpus here, so reaching it means something is wrong
+/// rather than merely old — and the walk still returns what it has with
+/// a cursor, so the caller can continue instead of being told a
+/// truncated list is complete.
+const MAX_WINDOWS: usize = 120;
+
+/// Pack the walk's position into one opaque token: the window we are in
+/// plus klams' own cursor inside it. The browser holds a single string
+/// and never learns there are two halves.
+fn encode_timeline_cursor(until: chrono::DateTime<chrono::Utc>, upstream: Option<&str>) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
+        "{}|{}",
+        until.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+        upstream.unwrap_or(""),
+    ))
+}
+
+fn decode_timeline_cursor(raw: &str) -> Option<(chrono::DateTime<chrono::Utc>, Option<String>)> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(raw)
+        .ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    let (until, upstream) = text.split_once('|')?;
+    let until = chrono::DateTime::parse_from_rfc3339(until)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    Some((until, (!upstream.is_empty()).then(|| upstream.to_string())))
+}
+
+#[derive(Deserialize)]
+struct AuthorMemoriesParams {
+    limit: Option<u32>,
+    cursor: Option<String>,
+    kinds: Option<String>,
+    state: Option<String>,
+}
+
+/// One author's memories as a single newest-first timeline.
+///
+/// klams' own `/v1/authors/{id}/memories` is not one: it emits whole
+/// kind **sections** in a fixed order — facts, then events, then
+/// knowledge — and the knowledge section comes back *ascending*, out of
+/// a Qdrant point-id scroll. So an author's first page was their oldest
+/// chunks, directly under a chart saying what they wrote this week.
+///
+/// `/v1/memories` already merges properly (klams #54: one
+/// `(created_at, id)` keyset across all three kinds, knowledge ordered
+/// by a datetime index). It is only capped to a 30-day *window* — so
+/// this walks that window backwards rather than proxying to it, which
+/// is what keeps the list all-time instead of silently 30 days deep.
+///
+/// The walk stops at the author's own `created_at`: the author row is
+/// written before any memory can reference it, so that is a real floor
+/// and not an estimate.
+///
+/// Merging per kind here instead — the other obvious shape — is not
+/// available: there is no newest-first knowledge stream for an author,
+/// so finding an author's newest knowledge means scrolling their whole
+/// segment, and the scanner authors have ~100k rows each.
 async fn author_memories(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    RawQuery(q): RawQuery,
+    Query(p): Query<AuthorMemoriesParams>,
 ) -> Response {
-    passthrough(&state, &format!("/v1/authors/{id}/memories"), q).await
+    let k = &state.0.klams;
+    let limit = p.limit.unwrap_or(50).clamp(1, 200) as usize;
+
+    // Resolve the author first, for the floor. It also keeps an unknown
+    // id a 404 (and a refused identity a 401) rather than an empty
+    // timeline, which would read as "this author wrote nothing".
+    let relay = match k.relay_get(&format!("/v1/authors/{id}"), "").await {
+        Ok(r) => r,
+        Err(e) => return upstream_err(e),
+    };
+    if !relay.status.is_success() {
+        return relay_response(relay);
+    }
+    let floor = serde_json::from_slice::<Value>(&relay.body)
+        .ok()
+        .and_then(|a| {
+            a["created_at"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        })
+        .map(|t| t.with_timezone(&chrono::Utc));
+    let Some(floor) = floor else {
+        // Without it there is no bound on the walk, and guessing one
+        // would quietly shorten the history. Say so instead.
+        return err(
+            StatusCode::BAD_GATEWAY,
+            "upstream_error",
+            "author has no parseable created_at to bound the timeline",
+        );
+    };
+
+    let mut base = format!("authors={}", urlenc(&id));
+    if let Some(kinds) = &p.kinds {
+        base.push_str(&format!("&kinds={}", urlenc(kinds)));
+    }
+    if let Some(st) = &p.state {
+        base.push_str(&format!("&state={}", urlenc(st)));
+    }
+
+    let (mut until, mut upstream) = match p.cursor.as_deref() {
+        Some(c) => match decode_timeline_cursor(c) {
+            Some(v) => v,
+            None => {
+                return err(
+                    StatusCode::BAD_REQUEST,
+                    "bad_cursor",
+                    "not a timeline cursor",
+                );
+            }
+        },
+        None => (chrono::Utc::now(), None),
+    };
+
+    let mut out: Vec<Value> = Vec::with_capacity(limit);
+    let mut next: Option<String> = None;
+    let mut windows = 0usize;
+
+    while until > floor {
+        if windows == MAX_WINDOWS {
+            // Hand back a cursor rather than an implicit "that's all".
+            next = Some(encode_timeline_cursor(until, upstream.as_deref()));
+            break;
+        }
+        windows += 1;
+
+        let since = (until - chrono::Duration::days(KLAMS_WINDOW_DAYS)).max(floor);
+        // Ask for only what is still missing. klams returns a short page
+        // *only* when the window is exhausted, so a page that fits can
+        // never be hiding rows this walk would then step past.
+        let remaining = limit - out.len();
+        let mut q = format!(
+            "{base}&limit={remaining}&since={}&until={}",
+            urlenc(&since.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)),
+            urlenc(&until.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)),
+        );
+        if let Some(c) = &upstream {
+            q.push_str(&format!("&cursor={}", urlenc(c)));
+        }
+
+        let page = match k.get_json("/v1/memories", &q).await {
+            Ok(p) => p,
+            Err(e) => return upstream_err(e),
+        };
+        for m in page["memories"].as_array().into_iter().flatten() {
+            out.push(m.clone());
+        }
+        let page_cursor = page["next_cursor"].as_str().map(String::from);
+
+        if out.len() >= limit {
+            next = match page_cursor {
+                // More in this window.
+                Some(c) => Some(encode_timeline_cursor(until, Some(&c))),
+                // Window done; resume at its lower edge — unless that
+                // edge is the floor, in which case there is no more
+                // history and offering a cursor would promise a page
+                // that comes back empty.
+                None if since > floor => Some(encode_timeline_cursor(since, None)),
+                None => None,
+            };
+            break;
+        }
+
+        match page_cursor {
+            Some(c) => upstream = Some(c),
+            None => {
+                until = since;
+                upstream = None;
+            }
+        }
+    }
+
+    Json(json!({ "memories": out, "next_cursor": next })).into_response()
 }
 
 async fn knowledge(State(state): State<AppState>, Path(id): Path<String>) -> Response {

@@ -48,7 +48,8 @@ and `is_scanner` in `src/api.rs` — the two must agree.
 | `GET /api/overview` | authors + healthz + metrics + `/v1/memories` first page | one call renders Pulse |
 | `GET /api/activity?since&until&kinds&authors&state&bucket&include_scanners` | pages `/v1/memories` server-side | returns time buckets by kind plus per-agent counts; page fetch capped, cap reported. `include_scanners=false` drops `*-scanner` authors from the counts — the walk still pages over them (klams has no exclude-author filter), and they still move `covered_since`, so coverage keeps describing the walk rather than the filter |
 | `GET /api/memories?…` | `/v1/memories` passthrough | table + cursor |
-| `GET /api/authors`, `/api/authors/{id}`, `/api/authors/{id}/memories` | passthrough | |
+| `GET /api/authors`, `/api/authors/{id}` | passthrough | |
+| `GET /api/authors/{id}/memories?limit&cursor&kinds&state` | walks `/v1/memories?authors=` server-side | one newest-first all-time timeline. klams' own author route serves kind *sections* (facts, events, then knowledge **ascending**), so this walks `/v1/memories`' 30-day window backwards to the author's `created_at` and merges there instead; composite cursor packs window + upstream cursor. Sprint 005 (#1448) — see the ordering gotcha below |
 | `POST /api/search` | `/memory/search` passthrough | |
 | `GET /api/knowledge/{id}` | passthrough | richest knowledge shape |
 | `GET /api/health` | `/healthz` passthrough | full snapshot |
@@ -76,14 +77,23 @@ purpose — no codegen at this scale).
 - `counts.restores_received` is hardcoded 0 upstream — never chart it.
 - `/v1/authors/{id}/memories` does **not** interleave by `created_at`.
   It serves the postgres-backed kinds (facts, events) newest-first and
-  *then* the knowledge rows, ascending, across cursor pages. A
-  multi-kind request is therefore not a merged timeline, and an author
-  whose recent writes are all knowledge gets a first page with none of
-  them. `/v1/memories?authors=<uuid>` sorts correctly but caps the
-  window at 30 days, so it is not a drop-in for an all-time history.
-  Found by sprint 003 while building the per-author chart (#807); the
-  author page names the ordering rather than hiding it, and merging it
-  properly is a follow-up.
+  *then* the knowledge rows, ascending, across cursor pages — the
+  knowledge section is a Qdrant point-id scroll, so there is no
+  newest-first knowledge stream for an author at all. **klams-view no
+  longer calls it.** `/api/authors/{id}/memories` builds the timeline
+  from `/v1/memories?authors=<uuid>` instead, which klams already
+  merges properly across kinds (klams #54). That endpoint caps the
+  *width* of `since..until` at 30 days but not how far back the pair
+  sits, so the route walks the window backwards in 30-day steps,
+  stopping at the author's own `created_at` — a real floor, since the
+  author row is written before any memory can reference it. The
+  composite cursor packs the current window and klams' cursor within
+  it, base64url, so the browser still holds one opaque token.
+
+  Merging per kind client-side is the shape that looks obvious and is
+  not available: finding an author's newest knowledge means scrolling
+  their whole segment, and the scanner authors carry ~100k rows each.
+  Found by sprint 003 (#807), fixed in sprint 005 (#1448).
 
 ## Visual identity
 
