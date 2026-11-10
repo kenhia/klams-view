@@ -6,3 +6,4 @@ web/build/
 web/.svelte-kit/
 .korg-sprint-proposal
 target/
+.sprint-defaults
